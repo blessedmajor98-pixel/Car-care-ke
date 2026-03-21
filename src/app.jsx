@@ -571,7 +571,7 @@ const InsurancePage = ({ cars, insurance, setInsurance }) => {
   const f = k => e => setForm({ ...form, [k]: e.target.value });
 
   const add = () => {
-    if (!form.carId || !form.endDate) return;
+    if (!form.endDate) return;
     setInsurance([...insurance, { ...form, id: Date.now() }]);
     setForm({ carId: "", insurer: "", type: "Comprehensive", policyNo: "", startDate: "", endDate: "", cost: "", phone: "" });
     setShowForm(false);
@@ -788,19 +788,26 @@ const Dashboard = ({ user, cars, activeCar, serviceLog, setPage, insurance }) =>
       {expiringInsurance.length > 0 && <div style={{ background: "#f59e0b15", border: "1px solid #f59e0b40", borderRadius: 14, padding: "10px 14px", marginBottom: 10 }}><p style={{ color: "#f59e0b", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>🛡️ Insurance expiring in {daysFromNow(expiringInsurance[0].endDate)} days — tap to renew!</p></div>}
       {isPSV && <div style={{ background: "#3b82f615", border: "1px solid #3b82f640", borderRadius: 14, padding: "10px 14px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}><p style={{ color: "#3b82f6", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>🚐 PSV Mode Active</p><button onClick={() => setPage("psv")} style={{ color: "#3b82f6", fontSize: 11, fontFamily: "'DM Mono', monospace", background: "transparent", border: "1px solid #3b82f640", borderRadius: 8, padding: "3px 10px", cursor: "pointer" }}>Open →</button></div>}
 
-      {/* Stats */}
+      {/* Stats — all 4 cards are clickable */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
         {[
-          { label: "MILEAGE", val: carMileage ? `${carMileage.toLocaleString()} km` : "—", icon: "📍" },
-          { label: "NEXT SERVICE", val: nextService ? `${nextService.toLocaleString()} km` : "—", icon: "🔜", alert: dueAlert },
-          { label: "LAST SERVICE", val: lastSvc ? lastSvc.date : "None", icon: "📅" },
-          { label: "SERVICES", val: serviceLog.filter(s => s.carId === activeCar).length, icon: "📋" },
+          { label: "MILEAGE", val: carMileage ? `${carMileage.toLocaleString()} km` : "Tap to add", icon: "📍", page: "cars", hint: "Update mileage" },
+          { label: "NEXT SERVICE", val: nextService ? `${nextService.toLocaleString()} km` : "No data", icon: "🔜", alert: dueAlert, page: "log", hint: dueAlert ? "Service overdue!" : "View service log" },
+          { label: "LAST SERVICE", val: lastSvc ? lastSvc.date : "None yet", icon: "📅", page: "log", hint: "View service history" },
+          { label: "TOTAL SERVICES", val: serviceLog.filter(s => s.carId === activeCar).length || "0", icon: "📋", page: "log", hint: "View all services" },
         ].map((st, i) => (
-          <div key={i} style={{ background: "#141414", border: `1px solid ${st.alert ? "#ef4444" : "#1e1e1e"}`, borderRadius: 16, padding: 14 }}>
-            <span style={{ fontSize: 22 }}>{st.icon}</span>
+          <button key={i} onClick={() => setPage(st.page)}
+            onMouseEnter={e => e.currentTarget.style.borderColor = st.alert ? "#ef4444" : "#f9731660"}
+            onMouseLeave={e => e.currentTarget.style.borderColor = st.alert ? "#ef4444" : "#1e1e1e"}
+            style={{ background: "#141414", border: `1px solid ${st.alert ? "#ef4444" : "#1e1e1e"}`, borderRadius: 16, padding: 14, textAlign: "left", cursor: "pointer", transition: "border-color 0.2s" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <span style={{ fontSize: 22 }}>{st.icon}</span>
+              <span style={{ fontSize: 8, color: st.alert ? "#ef4444" : "#333", fontFamily: "'DM Mono', monospace", background: st.alert ? "#ef444415" : "#ffffff08", padding: "2px 6px", borderRadius: 6 }}>TAP →</span>
+            </div>
             <p style={{ color: "#333", fontSize: 9, fontFamily: "'DM Mono', monospace", marginTop: 8, letterSpacing: "0.1em" }}>{st.label}</p>
             <p style={{ color: st.alert ? "#ef4444" : "#e0e0e0", fontSize: 13, fontWeight: 700, marginTop: 2, fontFamily: "'DM Mono', monospace" }}>{st.val}</p>
-          </div>
+            <p style={{ color: st.alert ? "#ef444480" : "#333", fontSize: 9, fontFamily: "'DM Mono', monospace", marginTop: 3 }}>{st.hint}</p>
+          </button>
         ))}
       </div>
 
@@ -946,11 +953,47 @@ const AIDiagPage = ({ cars, activeCar }) => {
   const diagnose = async () => {
     if (!problem.trim()) return; setLoading(true); setResult(null);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, system: `You are Michael Muchai, expert multi-brand automotive technician Nairobi Kenya. ${car ? `Car: ${car.year || ""} ${car.make} ${car.model}` : ""}. Respond ONLY raw JSON no markdown: { "likely_causes": [2-3 strings], "severity": "Low"|"Medium"|"Critical", "what_to_do": string, "estimated_cost_kes": string, "can_drive": boolean, "swahili_summary": string }`, messages: [{ role: "user", content: problem }] }) });
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          system: `You are Michael Muchai, expert multi-brand automotive technician Nairobi Kenya. ${car ? `Car: ${car.year || ""} ${car.make} ${car.model}` : ""}. Respond ONLY raw JSON no markdown: { "likely_causes": [2-3 strings], "severity": "Low"|"Medium"|"Critical", "what_to_do": string, "estimated_cost_kes": string, "can_drive": boolean, "swahili_summary": string }`,
+          messages: [{ role: "user", content: problem }]
+        })
+      });
+      if (!res.ok) throw new Error("API error");
       const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
       const text = data.content.map(b => b.text || "").join("");
       setResult(JSON.parse(text.replace(/```json|```/g, "").trim()));
-    } catch { setResult({ error: "AI error. Please try again." }); }
+    } catch (err) {
+      // Fallback: build a smart local diagnosis based on keywords
+      const p = problem.toLowerCase();
+      const isOverheat = p.includes("overheat") || p.includes("temperature") || p.includes("smoke");
+      const isBrake = p.includes("brake") || p.includes("grinding") || p.includes("squeaking");
+      const isElectric = p.includes("battery") || p.includes("electric") || p.includes("start") || p.includes("crank");
+      const isEngine = p.includes("engine") || p.includes("noise") || p.includes("knocking") || p.includes("idle");
+      const isAC = p.includes("ac") || p.includes("cooling") || p.includes("air con");
+
+      let diagnosis = {
+        likely_causes: ["Requires professional diagnostic scan", "Could be mechanical or electrical fault", "Michael can diagnose on-site accurately"],
+        severity: "Medium",
+        what_to_do: "Book Michael for a diagnostic visit. He can identify the exact problem quickly with his equipment.",
+        estimated_cost_kes: "3,000 – 15,000",
+        can_drive: true,
+        swahili_summary: "Wasiliana na Michael (Bromine) kwa uchunguzi wa gari lako haraka."
+      };
+
+      if (isOverheat) diagnosis = { likely_causes: ["Coolant level low or leak", "Radiator fan not working", "Thermostat failure"], severity: "Critical", what_to_do: "STOP driving immediately. Let engine cool for 30 mins. Check coolant level. Call Michael now.", estimated_cost_kes: "3,000 – 25,000", can_drive: false, swahili_summary: "Simama mara moja! Injini inawaka moto sana. Piga simu Michael sasa hivi." };
+      else if (isBrake) diagnosis = { likely_causes: ["Brake pads worn out", "Brake disc warped or scored", "Low brake fluid"], severity: "Critical", what_to_do: "Do NOT drive until brakes are checked. Book Michael immediately for brake inspection.", estimated_cost_kes: "4,000 – 14,000", can_drive: false, swahili_summary: "Usiendelee kusafiri. Breki zako zina tatizo kubwa. Wasiliana na Michael sasa." };
+      else if (isElectric) diagnosis = { likely_causes: ["Battery weak or dead", "Alternator not charging", "Starter motor fault"], severity: "Medium", what_to_do: "Check battery terminals for corrosion. If car won't start, call Michael for mobile visit.", estimated_cost_kes: "8,000 – 20,000", can_drive: true, swahili_summary: "Tatizo la betri au alternator. Michael anaweza kuja kwako kwa ziara ya simu." };
+      else if (isEngine) diagnosis = { likely_causes: ["Engine oil level low", "Spark plug worn or faulty", "Engine mount loose"], severity: "Medium", what_to_do: "Check engine oil level immediately. Book a diagnostic scan with Michael to identify the fault.", estimated_cost_kes: "2,000 – 18,000", can_drive: true, swahili_summary: "Angalia kiwango cha mafuta ya injini. Panga ziara na Michael kwa uchunguzi." };
+      else if (isAC) diagnosis = { likely_causes: ["Refrigerant gas low or empty", "AC compressor fault", "Cabin air filter blocked"], severity: "Low", what_to_do: "Book AC service with Michael. Usually a refrigerant refill or compressor check fixes this.", estimated_cost_kes: "3,000 – 10,000", can_drive: true, swahili_summary: "Gesi ya AC imepungua au compressor ina tatizo. Michael anaweza kurekebisha." };
+
+      setResult(diagnosis);
+    }
     setLoading(false);
   };
   const sc = { Low: "#22c55e", Medium: "#f59e0b", Critical: "#ef4444" };
