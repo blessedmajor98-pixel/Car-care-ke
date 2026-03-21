@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en-KE">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+
+    <!-- ─── PWA META TAGS ──────────────────────────────────────── -->
+    <title>Car Care Companion KE</title>
+    <meta name="description" content="Kenya's #1 car maintenance app. Warning lights, service reminders, AI diagnosis & 24/7 emergency help from Michael (Bromine) Muchai — Ngara, Nairobi." />
+    <meta name="keywords" content="car maintenance Kenya, mechanic Nairobi, car repair Nairobi, vehicle service Kenya, warning lights, Bromine mechanic" />
+    <meta name="author" content="Michael (Bromine) Muchai" />
+    <meta name="theme-color" content="#f97316" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="Car Care KE" />
+
+    <!-- ─── APPLE PWA TAGS ─────────────────────────────────────── -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Car Care KE" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png" />
+    <link rel="apple-touch-icon" sizes="144x144" href="/icons/icon-144.png" />
+
+    <!-- ─── OPEN GRAPH (WhatsApp preview when sharing link) ───── -->
+    <meta property="og:title" content="Car Care Companion KE" />
+    <meta property="og:description" content="Warning lights, AI diagnosis, service reminders & 24/7 emergency help. By Michael (Bromine) Muchai — Trusted mechanic in Ngara, Nairobi." />
+    <meta property="og:image" content="/icons/icon-512.png" />
+    <meta property="og:url" content="https://carcareke.vercel.app" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_KE" />
+
+    <!-- ─── TWITTER CARD ──────────────────────────────────────── -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Car Care Companion KE" />
+    <meta name="twitter:description" content="Kenya's #1 car app. By Michael (Bromine) Muchai." />
+
+    <!-- ─── MANIFEST ──────────────────────────────────────────── -->
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-96.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-72.png" />
+
+    <!-- ─── SPLASH SCREENS (iPhone) ──────────────────────────── -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+
+    <style>
+      /* Prevent flash of unstyled content */
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #080808;
+        font-family: sans-serif;
+        -webkit-tap-highlight-color: transparent;
+        overscroll-behavior: none;
+      }
+      #root {
+        min-height: 100vh;
+        min-height: 100dvh; /* Dynamic viewport for mobile browsers */
+      }
+      /* Loading spinner shown before React mounts */
+      #splash {
+        position: fixed;
+        inset: 0;
+        background: #080808;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        transition: opacity 0.4s ease;
+      }
+      #splash.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #splash-icon {
+        font-size: 72px;
+        margin-bottom: 20px;
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+      #splash-title {
+        font-family: Georgia, serif;
+        font-size: 28px;
+        color: #f97316;
+        letter-spacing: -0.02em;
+        margin-bottom: 6px;
+      }
+      #splash-sub {
+        font-family: monospace;
+        font-size: 12px;
+        color: #333;
+        letter-spacing: 0.05em;
+      }
+      #splash-bar {
+        width: 120px;
+        height: 3px;
+        background: #1a1a1a;
+        border-radius: 10px;
+        margin-top: 32px;
+        overflow: hidden;
+      }
+      #splash-progress {
+        height: 100%;
+        background: #f97316;
+        border-radius: 10px;
+        animation: load 1.2s ease-in-out forwards;
+      }
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+      }
+      @keyframes load {
+        from { width: 0%; }
+        to { width: 100%; }
+      }
+      /* Offline banner */
+      #offline-banner {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: #e9270ec4;
+        color: white;
+        text-align: center;
+        padding: 8px;
+        font-family: monospace;
+        font-size: 12px;
+        z-index: 9998;
+        transform: translateY(-100%);
+        transition: transform 0.3s ease;
+      }
+      #offline-banner.visible {
+        transform: translateY(0);
+      }
+      /* Install prompt */
+      #install-prompt {
+        position: fixed;
+        bottom: 80px;
+        left: 16px;
+        right: 16px;
+        background: #000000;
+        border: 1px solid #f9731640;
+        border-radius: 18px;
+        padding: 16px;
+        display: none;
+        z-index: 1000;
+        box-shadow: 0 8px 32px #00000080;
+        max-width: 398px;
+        margin: 0 auto;
+      }
+      #install-prompt.visible {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      #install-prompt-text { flex: 1; }
+      #install-prompt-title {
+        color: #fff;
+        font-size: 14px;
+        font-weight: 700;
+        font-family: monospace;
+        margin-bottom: 3px;
+      }
+      #install-prompt-sub {
+        color: #555;
+        font-size: 11px;
+        font-family: monospace;
+      }
+      #install-btn {
+        background: #f97316;
+        color: white;
+        border: none;
+        border-radius: 10px;
+        padding: 8px 16px;
+        font-family: monospace;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      #install-dismiss {
+        background: transparent;
+        border: none;
+        color: #444;
+        font-size: 18px;
+        cursor: pointer;
+        padding: 0 4px;
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-b93c485c.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-b1791c80.js">
+  </head>
+
+  <body>
+    <!-- Offline Banner -->
+    <div id="offline-banner">📵 You're offline — some features may be limited</div>
+
+    <!-- Splash Screen -->
+    <div id="splash">
+      <div id="splash-icon">🚗</div>
+      <div id="splash-title">Car Care KE</div>
+      <div id="splash-sub">by Michael (Bromine) Muchai</div>
+      <div id="splash-bar"><div id="splash-progress"></div></div>
+    </div>
+
+    <!-- Install Prompt (Android Chrome) -->
+    <div id="install-prompt">
+      <div style="font-size: 32px">🚗</div>
+      <div id="install-prompt-text">
+        <div id="install-prompt-title">Install Car Care KE</div>
+        <div id="install-prompt-sub">Add to home screen for quick access</div>
+      </div>
+      <button id="install-btn">Install</button>
+      <button id="install-dismiss">✕</button>
+    </div>
+
+    <!-- React App Root -->
+    <div id="root"></div>
+
+    <!-- Main App Script (Vite/React build output) -->
+    
+
+    <script>
+      // ─── SPLASH SCREEN ────────────────────────────────────────
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          const splash = document.getElementById('splash');
+          if (splash) {
+            splash.classList.add('hidden');
+            setTimeout(() => splash.remove(), 400);
+          }
+        }, 1400);
+      });
+
+      // ─── SERVICE WORKER REGISTRATION ─────────────────────────
+      if ('serviceWorker' in navigator && location.hostname !== 'www.claudeusercontent.com') {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js', { scope: '/' })
+            .then((registration) => {
+              console.log('[App] Service Worker registered:', registration.scope);
+
+              // Check for updates every 60 minutes
+              setInterval(() => registration.update(), 60 * 60 * 1000);
+
+              // Notify user when new version available
+              registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                newWorker.addEventListener('statechange', () => {
+                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    console.log('[App] New version available — reload to update');
+                    // Optional: show update banner
+                  }
+                });
+              });
+            })
+            .catch((error) => {
+              console.error('[App] Service Worker registration failed:', error);
+            });
+        });
+      }
+
+      // ─── OFFLINE DETECTION ───────────────────────────────────
+      const offlineBanner = document.getElementById('offline-banner');
+      const updateOnlineStatus = () => {
+        if (!navigator.onLine) {
+          offlineBanner.classList.add('visible');
+        } else {
+          offlineBanner.classList.remove('visible');
+        }
+      };
+      window.addEventListener('online', updateOnlineStatus);
+      window.addEventListener('offline', updateOnlineStatus);
+      updateOnlineStatus();
+
+      // ─── PWA INSTALL PROMPT ──────────────────────────────────
+      let deferredPrompt;
+      const installPrompt = document.getElementById('install-prompt');
+      const installBtn = document.getElementById('install-btn');
+      const dismissBtn = document.getElementById('install-dismiss');
+
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        // Only show if user hasn't dismissed it before
+        const dismissed = localStorage.getItem('pwa-install-dismissed');
+        if (!dismissed) {
+          setTimeout(() => installPrompt.classList.add('visible'), 3000);
+        }
+      });
+
+      installBtn.addEventListener('click', async () => {
+        installPrompt.classList.remove('visible');
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          const { outcome } = await deferredPrompt.userChoice;
+          console.log('[App] Install outcome:', outcome);
+          deferredPrompt = null;
+        }
+      });
+
+      dismissBtn.addEventListener('click', () => {
+        installPrompt.classList.remove('visible');
+        localStorage.setItem('pwa-install-dismissed', 'true');
+      });
+
+      window.addEventListener('appinstalled', () => {
+        console.log('[App] Car Care KE was installed!');
+        installPrompt.classList.remove('visible');
+      });
+    </script>
+  </body>
+</html>
