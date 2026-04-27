@@ -163,7 +163,7 @@ const ClientPortal = ({ user, setPage }) => {
   const [plan, setPlan] = useState("monthly");
   const [phone, setPhone] = useState("");
   const [service, setService] = useState("");
-  const [location, setLocation] = useState("");
+  const [location, setLocation] = useState("");  
   const [notes, setNotes] = useState("");
 
   const BACKEND_URL = "https://carcare-ke-backend-production.up.railway.app";
@@ -197,14 +197,14 @@ const ClientPortal = ({ user, setPage }) => {
 
   const payMpesa = async (amount) => {
     if (!phone) { setPayMsg("⚠️ Enter your M-Pesa phone number first"); return; }
-    if (!user) { setPayMsg("⚠️ Not logged in"); return; }
+    if (!user?.uid) { setPayMsg("⚠️ Not logged in"); return; }
     setPayLoading(true);
     setPayMsg("📲 Sending STK push to your phone...");
     try {
       const res = await fetch(`${BACKEND_URL}/pay`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, amount, userId: user.email || user.name || "guest" }),
+        body: JSON.stringify({ phone, amount, userId: user.uid }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -214,7 +214,8 @@ const ClientPortal = ({ user, setPage }) => {
         setPayMsg(`❌ ${data.error || "Payment failed — try again"}`);
       }
     } catch (err) {
-      setPayMsg("❌ Cannot reach payment server — check connection");
+      console.error("PAY ERROR:", err);
+setPayMsg("❌ Check browser console for error details");
     }
     setPayLoading(false);
   };
