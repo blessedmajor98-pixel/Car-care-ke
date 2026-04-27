@@ -151,6 +151,634 @@ const AuthPage = ({ onLogin }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// CLIENT PORTAL
+// ═══════════════════════════════════════════════════════════════════════════════
+const ClientPortal = ({ user, setPage }) => {
+  const [clientTab, setClientTab] = useState("home");
+  const [subStatus, setSubStatus] = useState(null);
+  const [myRequests, setMyRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [payLoading, setPayLoading] = useState(false);
+  const [payMsg, setPayMsg] = useState("");
+  const [plan, setPlan] = useState("monthly");
+  const [phone, setPhone] = useState("");
+  const [service, setService] = useState("");
+  const [location, setLocation] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const BACKEND_URL = "https://carcare-ke-backend-production.up.railway.app";
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const { db } = await import('./firebase');
+      const { doc, getDoc, collection, query, where, getDocs, orderBy } = await import('firebase/firestore');
+      if (user?.uid) {
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (userDoc.exists()) setSubStatus(userDoc.data());
+      }
+      if (user?.uid) {
+        const q = query(collection(db, "service_requests"), where("userId", "==", user.uid), orderBy("createdAt", "desc"));
+        const snap = await getDocs(q);
+        setMyRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      }
+    } catch (err) {
+      console.warn("Firestore load error:", err.message);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { loadData(); }, [user]);
+
+  const now = new Date();
+  const isActive = subStatus?.status === "active" && subStatus?.expiresAt && subStatus.expiresAt.toDate() > now;
+  const daysLeft = subStatus?.expiresAt ? Math.ceil((subStatus.expiresAt.toDate() - now) / 86400000) : 0;
+  const expiryStr = subStatus?.expiresAt ? subStatus.expiresAt.toDate().toLocaleDateString("en-KE", { day: "numeric", month: "long", year: "numeric" }) : "—";
+
+  const payMpesa = async (amount) => {
+    if (!phone) { setPayMsg("⚠️ Enter your M-Pesa phone number first"); return; }
+    if (!user) { setPayMsg("⚠️ Not logged in"); return; }
+    setPayLoading(true);
+    setPayMsg("📲 Sending STK push to your phone...");
+    try {
+      const res = await fetch(`${BACKEND_URL}/pay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, amount, userId: user.email || user.name || "guest" }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPayMsg("✅ Check your phone — enter M-Pesa PIN to complete payment");
+        setTimeout(() => { loadData(); setPayMsg(""); }, 8000);
+      } else {
+        setPayMsg(`❌ ${data.error || "Payment failed — try again"}`);
+      }
+    } catch (err) {
+      setPayMsg("❌ Cannot reach payment server — check connection");
+    }
+    setPayLoading(false);
+  };
+
+  const submitRequest = async () => {
+    if (!service || !location) { setPayMsg("⚠️ Fill in service type and location"); return; }
+    try {
+      const { db } = await import('./firebase');
+      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+      await addDoc(collection(db, "service_requests"), {
+        userId: user?.uid || "anonymous",
+        userName: user?.name || user?.email || "Client",
+        service, location,
+        phone: phone || user?.phone || "",
+        notes: notes || "",
+        status: "pending",
+        createdAt: serverTimestamp(),
+      });
+      setService(""); setLocation(""); setPhone(""); setNotes("");
+      setPayMsg("✅ Request sent! Michael will contact you shortly.");
+      loadData();
+      setTimeout(() => setPayMsg(""), 5000);
+    } catch (err) {
+      setPayMsg("❌ Failed to send request — " + err.message);
+    }
+  };
+
+  const C = {
+    page:    { padding: "24px 16px 100px", minHeight: "100vh", background: "#080808" },
+    tabRow:  { display: "flex", gap: 6, marginBottom: 20, overflowX: "auto", paddingBottom: 4, scrollbarWidth: "none" },
+    tab:(on) => ({ padding: "7px 14px", borderRadius: 10, whiteSpace: "nowrap", border: on ? "1px solid #f97316" : "1px solid #1e1e1e", background: on ? "#f9731618" : "#141414", color: on ? "#f97316" : "#444", fontFamily: "'DM Mono', monospace", fontSize: 11, fontWeight: 600, cursor: "pointer" }),
+    card:    { background: "#141414", border: "1px solid #1e1e1e", borderRadius: 16, padding: 16, marginBottom: 12 },
+    label:   { color: "#444", fontSize: 9, fontFamily: "'DM Mono', monospace", letterSpacing: "0.12em", marginBottom: 6, display: "block" },
+    input:   { width: "100%", background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 10, padding: "11px 13px", color: "#fff", fontSize: 13, fontFamily: "'DM Mono', monospace", marginBottom: 10, outline: "none", boxSizing: "border-box" },
+    btn:(c)  => ({ width: "100%", padding: 14, borderRadius: 12, marginBottom: 10, background: c, color: "#fff", fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: 13, letterSpacing: "0.05em", cursor: "pointer", border: "none" }),
+    badge:(bg,t) => ({ background: bg, color: t, fontSize: 9, fontFamily: "'DM Mono', monospace", fontWeight: 700, padding: "3px 8px", borderRadius: 6 }),
+    sectionLabel: { color: "#f97316", fontSize: 10, fontFamily: "'DM Mono', monospace", letterSpacing: "0.12em", marginBottom: 12, display: "block" },
+    emptyState:   { textAlign: "center", padding: "28px 0", color: "#252525", fontSize: 11, fontFamily: "'DM Mono', monospace" },
+  };
+
+  const MsgBox = () => payMsg ? (
+    <div style={{ padding: "10px 14px", borderRadius: 10, background: payMsg.includes("✅") ? "#22c55e10" : "#ef444410", border: `1px solid ${payMsg.includes("✅") ? "#22c55e30" : "#ef444430"}`, marginBottom: 10 }}>
+      <span style={{ color: payMsg.includes("✅") ? "#22c55e" : "#ef4444", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>{payMsg}</span>
+    </div>
+  ) : null;
+
+  return (
+    <div style={C.page}>
+      <div style={C.tabRow}>
+        {[{ id: "home", label: "Home" }, { id: "subscribe", label: "Subscribe" }, { id: "request", label: "Request" }, { id: "history", label: "My Jobs" }].map(t => (
+          <button key={t.id} style={C.tab(clientTab === t.id)} onClick={() => setClientTab(t.id)}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* ── HOME ── */}
+      {clientTab === "home" && (
+        <>
+          <div style={{ marginBottom: 20 }}>
+            <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#fff", marginBottom: 4 }}>
+              {user?.name ? `Hey, ${user.name.split(" ")[0]} 👋` : "Welcome 👋"}
+            </h2>
+            <p style={{ color: "#333", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>Car Care KE · Client Portal</p>
+          </div>
+
+          <div style={{ ...C.card, border: isActive ? "1px solid #22c55e30" : "1px solid #ef444430", background: isActive ? "#22c55e06" : "#ef444406" }}>
+            <span style={{ ...C.sectionLabel, color: isActive ? "#22c55e" : "#ef4444" }}>
+              {isActive ? "✅ SUBSCRIPTION ACTIVE" : "❌ NO ACTIVE SUBSCRIPTION"}
+            </span>
+            {isActive ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, color: "#22c55e", lineHeight: 1 }}>{daysLeft}</div>
+                    <div style={{ color: "#444", fontSize: 9, fontFamily: "'DM Mono', monospace", marginTop: 4 }}>DAYS REMAINING</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ color: "#888", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 4 }}>Expires</div>
+                    <div style={{ color: "#fff", fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 600 }}>{expiryStr}</div>
+                  </div>
+                </div>
+                {daysLeft <= 7 && (
+                  <div style={{ marginTop: 12, padding: "8px 10px", background: "#f59e0b10", border: "1px solid #f59e0b30", borderRadius: 8 }}>
+                    <span style={{ color: "#f59e0b", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>⚠️ Expiring soon — renew to stay active</span>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div>
+                <p style={{ color: "#555", fontSize: 12, fontFamily: "'DM Mono', monospace", marginBottom: 12, lineHeight: 1.6 }}>
+                  Subscribe to unlock priority service, discounts & tracking.
+                </p>
+                <button style={C.btn("#f97316")} onClick={() => setClientTab("subscribe")}>💳 Subscribe Now</button>
+              </div>
+            )}
+          </div>
+
+          <div style={C.card}>
+            <span style={C.sectionLabel}>⚡ QUICK ACTIONS</span>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <button style={{ ...C.btn("#f97316"), marginBottom: 0, flex: 1, fontSize: 12 }} onClick={() => setClientTab("request")}>🔧 Request Service</button>
+              <button style={{ ...C.btn("#22c55e"), marginBottom: 0, flex: 1, fontSize: 12 }} onClick={() => setClientTab("subscribe")}>👑 Subscribe</button>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button style={{ ...C.btn("#3b82f6"), marginBottom: 0, flex: 1, fontSize: 12 }} onClick={() => setClientTab("history")}>📋 My Jobs</button>
+              <a href={`https://wa.me/${MECHANIC.whatsapp}`} target="_blank" rel="noreferrer" style={{ flex: 1, padding: 14, borderRadius: 12, background: "#25D36610", border: "1px solid #25D36630", color: "#25D366", fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: 12, cursor: "pointer", textAlign: "center", textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                💬 WhatsApp
+              </a>
+            </div>
+          </div>
+
+          <div style={C.card}>
+            <span style={C.sectionLabel}>🔧 YOUR MECHANIC</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+              <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#f9731620", border: "1px solid #f9731640", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>🔧</div>
+              <div>
+                <div style={{ color: "#fff", fontSize: 14, fontFamily: "'DM Mono', monospace", fontWeight: 600 }}>{MECHANIC.shortName}</div>
+                <div style={{ color: "#444", fontSize: 10, fontFamily: "'DM Mono', monospace", marginTop: 2 }}>{MECHANIC.title}</div>
+                <div style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace", marginTop: 2 }}>📍 {MECHANIC.garageShort} · {MECHANIC.hours}</div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <a href={`tel:${MECHANIC.phone}`} style={{ flex: 1, padding: "10px 8px", borderRadius: 10, background: "#f9731610", border: "1px solid #f9731630", color: "#f97316", fontFamily: "'DM Mono', monospace", fontSize: 11, fontWeight: 700, textDecoration: "none", textAlign: "center" }}>📞 Call</a>
+              <a href={`https://wa.me/${MECHANIC.whatsapp}`} target="_blank" rel="noreferrer" style={{ flex: 1, padding: "10px 8px", borderRadius: 10, background: "#25D36610", border: "1px solid #25D36630", color: "#25D366", fontFamily: "'DM Mono', monospace", fontSize: 11, fontWeight: 700, textDecoration: "none", textAlign: "center" }}>💬 WhatsApp</a>
+              <a href={MECHANIC.gmaps} target="_blank" rel="noreferrer" style={{ flex: 1, padding: "10px 8px", borderRadius: 10, background: "#3b82f610", border: "1px solid #3b82f630", color: "#3b82f6", fontFamily: "'DM Mono', monospace", fontSize: 11, fontWeight: 700, textDecoration: "none", textAlign: "center" }}>📍 Map</a>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── SUBSCRIBE ── */}
+      {clientTab === "subscribe" && (
+        <>
+          <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, color: "#fff", marginBottom: 4 }}>Subscribe</h2>
+          <p style={{ color: "#333", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 20 }}>Unlock priority service, discounts & tracking</p>
+
+          {[
+            { id: "monthly", label: "Monthly Plan", amount: 999, days: 30, perks: ["Priority booking", "10% discount on all services", "Service history tracking", "Free diagnostics check"] },
+            { id: "weekly",  label: "Weekly Plan",  amount: 299, days: 7,  perks: ["Priority booking", "5% discount on services", "Service history tracking"] },
+          ].map(p => (
+            <div key={p.id} onClick={() => setPlan(p.id)}
+              style={{ ...C.card, border: plan === p.id ? "1px solid #f97316" : "1px solid #1e1e1e", background: plan === p.id ? "#f9731608" : "#141414", cursor: "pointer" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                <div>
+                  <div style={{ color: "#fff", fontSize: 14, fontFamily: "'DM Mono', monospace", fontWeight: 700, marginBottom: 4 }}>{p.label}</div>
+                  <div style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{p.days} days access</div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, color: "#f97316", lineHeight: 1 }}>{KES(p.amount)}</div>
+                  <div style={{ color: "#333", fontSize: 9, fontFamily: "'DM Mono', monospace", marginTop: 3 }}>via M-Pesa</div>
+                </div>
+              </div>
+              {p.perks.map((pk, i) => <div key={i} style={{ color: "#555", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 3 }}>✓ {pk}</div>)}
+              {plan === p.id && <div style={{ marginTop: 8 }}><span style={{ color: "#f97316", fontSize: 10, fontFamily: "'DM Mono', monospace", fontWeight: 700, background: "#f9731615", padding: "3px 10px", borderRadius: 6 }}>SELECTED</span></div>}
+            </div>
+          ))}
+
+          <div style={C.card}>
+            <span style={C.sectionLabel}>💚 PAY WITH M-PESA</span>
+            <span style={C.label}>YOUR M-PESA PHONE NUMBER</span>
+            <input
+              placeholder="0712 345 678"
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
+              style={C.input}
+              type="tel"
+              inputMode="numeric"
+            />
+            <MsgBox />
+            <button style={{ ...C.btn("#22c55e"), opacity: payLoading || !phone ? 0.6 : 1 }}
+              onClick={() => payMpesa(plan === "monthly" ? 999 : 299)}
+              disabled={payLoading || !phone}>
+              {payLoading ? "⟳ Processing..." : `💚 Pay ${plan === "monthly" ? "KES 999" : "KES 299"} Now`}
+            </button>
+            <p style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace", textAlign: "center", lineHeight: 1.6 }}>STK push sent to your phone. Enter M-Pesa PIN to complete.</p>
+          </div>
+        </>
+      )}
+
+      {/* ── REQUEST ── */}
+      {clientTab === "request" && (
+        <>
+          <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, color: "#fff", marginBottom: 4 }}>Request Service</h2>
+          <p style={{ color: "#333", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 20 }}>Michael will confirm and contact you</p>
+          <div style={C.card}>
+            <span style={C.label}>SERVICE TYPE</span>
+            <select value={service} onChange={e => setService(e.target.value)} style={C.input}>
+              <option value="">Select service...</option>
+              {SERVICE_TYPES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <span style={C.label}>YOUR LOCATION</span>
+            <input
+              placeholder="e.g. Ngara, Westlands, CBD..."
+              value={location}
+              onChange={e => setLocation(e.target.value)}
+              style={C.input}
+            />
+            <span style={C.label}>YOUR PHONE NUMBER</span>
+            <input
+              placeholder="0712 345 678"
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
+              style={C.input}
+              type="tel"
+              inputMode="numeric"
+            />
+            <span style={C.label}>DESCRIBE THE PROBLEM (OPTIONAL)</span>
+            <textarea
+              placeholder="What's happening with your car?..."
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              style={{ ...C.input, minHeight: 80, resize: "vertical" }}
+            />
+            <MsgBox />
+            <button style={{ ...C.btn("#f97316"), opacity: (!service || !location) ? 0.5 : 1 }}
+              onClick={submitRequest}
+              disabled={!service || !location}>
+              📤 Send Request
+            </button>
+            <p style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace", textAlign: "center" }}>Goes directly to Michael's Owner Panel</p>
+          </div>
+        </>
+      )}
+
+      {/* ── HISTORY ── */}
+      {clientTab === "history" && (
+        <div style={C.card}>
+          <span style={C.sectionLabel}>📋 MY SERVICE REQUESTS</span>
+          {loading ? <div style={C.emptyState}>⟳ Loading...</div>
+            : myRequests.length === 0 ? <div style={C.emptyState}>No requests yet · Tap "Request Service" to start</div>
+            : myRequests.map((r, i) => {
+              const statusMap = { pending: ["#f59e0b20","#f59e0b","PENDING"], accepted: ["#3b82f620","#3b82f6","ACCEPTED"], active: ["#a855f720","#a855f7","IN PROGRESS"], done: ["#22c55e20","#22c55e","DONE"], cancelled: ["#ef444420","#ef4444","CANCELLED"] };
+              const [bg, color, label] = statusMap[r.status] || ["#33333320","#555","UNKNOWN"];
+              return (
+                <div key={r.id} style={{ padding: "12px 0", borderBottom: i < myRequests.length - 1 ? "1px solid #111" : "none" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                    <div style={{ color: "#fff", fontSize: 13, fontFamily: "'DM Mono', monospace", fontWeight: 600 }}>{r.service}</div>
+                    <span style={C.badge(bg, color)}>{label}</span>
+                  </div>
+                  <div style={{ color: "#444", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 3 }}>📍 {r.location}</div>
+                  {r.notes && <div style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{r.notes}</div>}
+                </div>
+              );
+            })
+          }
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// OWNER PANEL
+// ═══════════════════════════════════════════════════════════════════════════════
+const OwnerPanel = ({ setPage }) => {
+  const [ownerTab, setOwnerTab] = useState("inbox");
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(null);
+  const [reminders, setReminders] = useState([]);
+
+  // ── Service intervals ──────────────────────────────────────────────────────
+  const SERVICE_INTERVALS = {
+    "Oil Change":          { km: 5000,  months: 3  },
+    "Full Service":        { km: 20000, months: 6  },
+    "Brake Service":       { km: 15000, months: 12 },
+    "Tyre Change":         { km: 10000, months: 6  },
+    "Air Filter":          { km: 15000, months: 6  },
+    "Wheel Alignment":     { km: 10000, months: 6  },
+    "Engine Diagnostics":  { km: null,  months: 12 },
+    "AC Repair":           { km: null,  months: 12 },
+    "Gearbox":             { km: 40000, months: 24 },
+    "Suspension":          { km: 20000, months: 12 },
+    "Battery":             { km: null,  months: 12 },
+    "Electrical":          { km: null,  months: 12 },
+    "PSV Inspection":      { km: null,  months: 6  },
+  };
+
+  const loadRequests = async () => {
+    setLoading(true);
+    try {
+      const { db } = await import('./firebase');
+      const { collection, getDocs, query, orderBy } = await import('firebase/firestore');
+      const snap = await getDocs(query(collection(db, "service_requests"), orderBy("createdAt", "desc")));
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setRequests(all);
+
+      // Build reminders from completed jobs
+      const done = all.filter(r => r.status === "done" && r.phone);
+      const now = new Date();
+      const upcoming = [];
+      done.forEach(job => {
+        const interval = SERVICE_INTERVALS[job.service];
+        if (!interval) return;
+        const completedAt = job.updatedAt?.toDate ? job.updatedAt.toDate() : job.createdAt?.toDate ? job.createdAt.toDate() : null;
+        if (!completedAt) return;
+        const dueDate = new Date(completedAt);
+        dueDate.setMonth(dueDate.getMonth() + interval.months);
+        const daysUntilDue = Math.ceil((dueDate - now) / 86400000);
+        if (daysUntilDue <= 30) {
+          upcoming.push({
+            ...job,
+            dueDate,
+            daysUntilDue,
+            interval,
+            overdue: daysUntilDue < 0,
+          });
+        }
+      });
+      upcoming.sort((a, b) => a.daysUntilDue - b.daysUntilDue);
+      setReminders(upcoming);
+    } catch (err) {
+      console.warn("Load error:", err.message);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { loadRequests(); }, []);
+
+  const updateStatus = async (jobId, status) => {
+    setUpdating(jobId);
+    try {
+      const { db } = await import('./firebase');
+      const { doc, updateDoc, serverTimestamp } = await import('firebase/firestore');
+      await updateDoc(doc(db, "service_requests", jobId), { status, updatedAt: serverTimestamp() });
+      setRequests(r => r.map(j => j.id === jobId ? { ...j, status } : j));
+
+      const job = requests.find(j => j.id === jobId);
+      if (job?.phone) {
+        const waPhone = job.phone.replace(/^0/, "254").replace(/\s/g, "");
+        let waMsg = "";
+        if (status === "accepted") {
+          waMsg = encodeURIComponent(
+            `✅ *Job Confirmed — Car Care KE*\n\n` +
+            `Hi ${job.userName || "there"}! 🔧\n\n` +
+            `Your request for *${job.service}* has been accepted.\n` +
+            `📍 Location: ${job.location}\n\n` +
+            `I'll be in touch shortly to confirm the exact time.\n\n` +
+            `— Michael (Bromine) Muchai\n📞 0115101100`
+          );
+        } else if (status === "active") {
+          waMsg = encodeURIComponent(
+            `🔧 *Job Started — Car Care KE*\n\n` +
+            `Hi ${job.userName || "there"}!\n\n` +
+            `I'm now working on your *${job.service}*.\n` +
+            `I'll update you once it's done.\n\n` +
+            `— Michael (Bromine) Muchai`
+          );
+        } else if (status === "done") {
+          const interval = SERVICE_INTERVALS[job.service];
+          const nextDate = interval ? (() => { const d = new Date(); d.setMonth(d.getMonth() + interval.months); return d.toLocaleDateString("en-KE", { day: "numeric", month: "long", year: "numeric" }); })() : null;
+          waMsg = encodeURIComponent(
+            `✅ *Job Complete — Car Care KE*\n\n` +
+            `Hi ${job.userName || "there"}! 🎉\n\n` +
+            `Your *${job.service}* is done!\n\n` +
+            (nextDate ? `📅 Your next *${job.service}* will be due around *${nextDate}*.\nI'll remind you when it's time!\n\n` : "") +
+            `Thank you for choosing Car Care KE.\n\n` +
+            `⭐ A quick review means the world — just reply with your rating 1-5!\n\n` +
+            `— Michael (Bromine) Muchai\n📞 0115101100`
+          );
+        } else if (status === "cancelled") {
+          waMsg = encodeURIComponent(
+            `❌ *Job Cancelled — Car Care KE*\n\n` +
+            `Hi ${job.userName || "there"},\n\n` +
+            `Unfortunately I'm unable to take your *${job.service}* request at this time.\n\n` +
+            `Please call or WhatsApp me to reschedule.\n\n` +
+            `— Michael (Bromine) Muchai\n📞 0115101100`
+          );
+        }
+        if (waMsg) window.open(`https://wa.me/${waPhone}?text=${waMsg}`, "_blank");
+      }
+    } catch (err) {
+      console.warn("Update error:", err.message);
+    }
+    setUpdating(null);
+  };
+
+  const sendReminder = (reminder) => {
+    const waPhone = (reminder.phone || "").replace(/^0/, "254").replace(/\s/g, "");
+    const overdue = reminder.daysUntilDue < 0;
+    const dueStr = reminder.dueDate.toLocaleDateString("en-KE", { day: "numeric", month: "long", year: "numeric" });
+    const waMsg = encodeURIComponent(
+      `🔔 *Service Reminder — Car Care KE*\n\n` +
+      `Hi ${reminder.userName || "there"}! 👋\n\n` +
+      (overdue
+        ? `Your *${reminder.service}* was due on *${dueStr}* and is now overdue.\n\n⚠️ Delaying this service can cause further damage to your car.\n\n`
+        : `Your *${reminder.service}* is due ${reminder.daysUntilDue === 0 ? "TODAY" : `in *${reminder.daysUntilDue} days*`} (around *${dueStr}*).\n\n`) +
+      `📍 We're at Desai Rd, Ngara — or I can come to you!\n\n` +
+      `Reply to book your appointment 🔧\n\n` +
+      `— Michael (Bromine) Muchai\n📞 0115101100`
+    );
+    window.open(`https://wa.me/${waPhone}?text=${waMsg}`, "_blank");
+  };
+
+  const pending   = requests.filter(r => r.status === "pending");
+  const active    = requests.filter(r => r.status === "accepted" || r.status === "active");
+  const completed = requests.filter(r => r.status === "done");
+
+  const O = {
+    page:    { padding: "24px 16px 100px", minHeight: "100vh", background: "#080808" },
+    tabRow:  { display: "flex", gap: 6, marginBottom: 20, overflowX: "auto", paddingBottom: 4, scrollbarWidth: "none" },
+    tab:(on) => ({ padding: "7px 14px", borderRadius: 10, whiteSpace: "nowrap", border: on ? "1px solid #f97316" : "1px solid #1e1e1e", background: on ? "#f9731618" : "#141414", color: on ? "#f97316" : "#444", fontFamily: "'DM Mono', monospace", fontSize: 11, fontWeight: 600, cursor: "pointer" }),
+    card:    { background: "#141414", border: "1px solid #1e1e1e", borderRadius: 16, padding: 16, marginBottom: 12 },
+    badge:(bg,t) => ({ background: bg, color: t, fontSize: 9, fontFamily: "'DM Mono', monospace", fontWeight: 700, padding: "3px 8px", borderRadius: 6, flexShrink: 0 }),
+    emptyState: { textAlign: "center", padding: "28px 0", color: "#252525", fontSize: 11, fontFamily: "'DM Mono', monospace" },
+    actionBtn:(c) => ({ flex: 1, padding: "9px 6px", borderRadius: 10, border: `1px solid ${c}30`, background: `${c}10`, color: c, fontFamily: "'DM Mono', monospace", fontSize: 10, fontWeight: 700, cursor: "pointer", textAlign: "center" }),
+  };
+
+  const statusColors = {
+    pending:   ["#f59e0b20","#f59e0b","PENDING"],
+    accepted:  ["#3b82f620","#3b82f6","ACCEPTED"],
+    active:    ["#a855f720","#a855f7","IN PROGRESS"],
+    done:      ["#22c55e20","#22c55e","DONE"],
+    cancelled: ["#ef444420","#ef4444","CANCELLED"],
+  };
+
+  const fmt = (ts) => { try { const d = ts?.toDate ? ts.toDate() : new Date(ts); return d.toLocaleDateString("en-KE", { day: "numeric", month: "short" }) + " " + d.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" }); } catch { return "—"; } };
+
+  const JobCard = ({ job }) => {
+    const [bg, color, label] = statusColors[job.status] || ["#33333320","#555","UNKNOWN"];
+    const isUpdating = updating === job.id;
+    const waPhone = (job.phone || "").replace(/^0/, "254").replace(/\s/g, "");
+    const waMsg = encodeURIComponent(`Hi ${job.userName || "there"}, your request for "${job.service}" has been received. I'll be in touch shortly. — Michael, Car Care KE`);
+    return (
+      <div style={{ ...O.card, border: job.status === "pending" ? "1px solid #f97316" : "1px solid #1e1e1e" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: "#fff", fontSize: 14, fontFamily: "'DM Mono', monospace", fontWeight: 700, marginBottom: 3 }}>{job.service}</div>
+            <div style={{ color: "#888", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{job.userName || "Client"}</div>
+          </div>
+          <span style={O.badge(bg, color)}>{label}</span>
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ color: "#555", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 4 }}>📍 {job.location || "—"}</div>
+          <div style={{ color: "#555", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 4 }}>📞 {job.phone || "—"}</div>
+          {job.notes && <div style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace", marginBottom: 4 }}>💬 {job.notes}</div>}
+          <div style={{ color: "#222", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>🕐 {fmt(job.createdAt)}</div>
+        </div>
+        {job.phone && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            <a href={`tel:${job.phone}`} style={{ ...O.actionBtn("#f97316"), textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>📞 Call</a>
+            <a href={`https://wa.me/${waPhone}?text=${waMsg}`} target="_blank" rel="noreferrer" style={{ ...O.actionBtn("#25D366"), textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>💬 WhatsApp</a>
+            <a href={`https://www.google.com/maps/search/${encodeURIComponent(job.location || "Nairobi")}`} target="_blank" rel="noreferrer" style={{ ...O.actionBtn("#3b82f6"), textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>📍 Map</a>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 6 }}>
+          {job.status === "pending" && (
+            <>
+              <button style={{ ...O.actionBtn("#22c55e"), flex: 2 }} onClick={() => updateStatus(job.id, "accepted")} disabled={isUpdating}>{isUpdating ? "⟳" : "✅ Accept"}</button>
+              <button style={{ ...O.actionBtn("#ef4444"), flex: 1 }} onClick={() => updateStatus(job.id, "cancelled")} disabled={isUpdating}>❌ Reject</button>
+            </>
+          )}
+          {job.status === "accepted" && (
+            <>
+              <button style={{ ...O.actionBtn("#a855f7"), flex: 2 }} onClick={() => updateStatus(job.id, "active")} disabled={isUpdating}>{isUpdating ? "⟳" : "🔧 Start Job"}</button>
+              <button style={{ ...O.actionBtn("#ef4444"), flex: 1 }} onClick={() => updateStatus(job.id, "cancelled")} disabled={isUpdating}>❌</button>
+            </>
+          )}
+          {job.status === "active" && (
+            <button style={{ ...O.actionBtn("#22c55e"), width: "100%" }} onClick={() => updateStatus(job.id, "done")} disabled={isUpdating}>{isUpdating ? "⟳ Saving..." : "✅ Mark Complete"}</button>
+          )}
+          {(job.status === "done" || job.status === "cancelled") && (
+            <div style={{ color: "#222", fontSize: 10, fontFamily: "'DM Mono', monospace", width: "100%", textAlign: "center", padding: "8px 0" }}>
+              {job.status === "done" ? "✅ Job completed" : "❌ Job cancelled"}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const jobLists = { inbox: pending, active, completed, all: requests };
+  const OWNER_TABS = [
+    { id: "inbox",     label: `Inbox${pending.length > 0 ? ` (${pending.length})` : ""}` },
+    { id: "active",    label: "Active" },
+    { id: "completed", label: "Done" },
+    { id: "reminders", label: `Reminders${reminders.length > 0 ? ` (${reminders.length})` : ""}` },
+    { id: "all",       label: "All Jobs" },
+  ];
+
+  return (
+    <div style={O.page}>
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#fff", marginBottom: 4 }}>Owner Panel</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <p style={{ color: "#333", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>Live service requests</p>
+          <button onClick={loadRequests} style={{ padding: "4px 10px", borderRadius: 8, border: "1px solid #1e1e1e", background: "transparent", color: "#333", fontFamily: "'DM Mono', monospace", fontSize: 10, cursor: "pointer" }}>↺ Refresh</button>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 16 }}>
+        {[{ label: "PENDING", val: pending.length, color: "#f59e0b" }, { label: "ACTIVE", val: active.length, color: "#a855f7" }, { label: "DONE", val: completed.length, color: "#22c55e" }, { label: "REMIND", val: reminders.length, color: "#f97316" }].map(s => (
+          <div key={s.label} style={{ background: "#141414", border: `1px solid ${s.color}22`, borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: s.color, lineHeight: 1 }}>{s.val}</div>
+            <div style={{ color: "#333", fontSize: 8, fontFamily: "'DM Mono', monospace", marginTop: 4 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {pending.length > 0 && (
+        <div style={{ padding: "8px 12px", background: "#f97316", borderRadius: 10, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 16 }}>🔔</span>
+          <span style={{ color: "#fff", fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>{pending.length} new job{pending.length > 1 ? "s" : ""} waiting for your response</span>
+        </div>
+      )}
+
+      {reminders.length > 0 && ownerTab !== "reminders" && (
+        <div style={{ padding: "8px 12px", background: "#f59e0b15", border: "1px solid #f59e0b40", borderRadius: 10, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ color: "#f59e0b", fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>⏰ {reminders.length} service reminder{reminders.length > 1 ? "s" : ""} due</span>
+          <button onClick={() => setOwnerTab("reminders")} style={{ color: "#f59e0b", fontSize: 10, fontFamily: "'DM Mono', monospace", background: "transparent", border: "1px solid #f59e0b40", borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>View →</button>
+        </div>
+      )}
+
+      <div style={O.tabRow}>
+        {OWNER_TABS.map(t => <button key={t.id} style={O.tab(ownerTab === t.id)} onClick={() => setOwnerTab(t.id)}>{t.label}</button>)}
+      </div>
+
+      {ownerTab === "reminders" ? (
+        <>
+          <div style={{ ...O.card, border: "1px solid #f59e0b30", background: "#f59e0b06", marginBottom: 14 }}>
+            <p style={{ color: "#f59e0b", fontSize: 10, fontFamily: "'DM Mono', monospace", letterSpacing: "0.1em", marginBottom: 6 }}>⏰ SERVICE REMINDERS</p>
+            <p style={{ color: "#555", fontSize: 11, fontFamily: "'DM Mono', monospace", lineHeight: 1.6 }}>Customers with services due in the next 30 days based on their last completed job. Tap Send Reminder to WhatsApp them instantly.</p>
+          </div>
+          {loading ? <div style={O.emptyState}>⟳ Loading...</div>
+            : reminders.length === 0 ? (
+              <div style={O.emptyState}>
+                <div style={{ fontSize: 40, marginBottom: 10 }}>✅</div>
+                No reminders due in the next 30 days
+              </div>
+            ) : reminders.map((r, i) => {
+              const overdue = r.daysUntilDue < 0;
+              const color = overdue ? "#ef4444" : r.daysUntilDue <= 7 ? "#f59e0b" : "#22c55e";
+              const label = overdue ? `${Math.abs(r.daysUntilDue)}d OVERDUE` : r.daysUntilDue === 0 ? "DUE TODAY" : `${r.daysUntilDue}d LEFT`;
+              return (
+                <div key={i} style={{ ...O.card, border: `1px solid ${color}30` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ color: "#fff", fontSize: 13, fontFamily: "'DM Mono', monospace", fontWeight: 700, marginBottom: 3 }}>{r.service}</div>
+                      <div style={{ color: "#888", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{r.userName || "Client"} · {r.phone || "—"}</div>
+                    </div>
+                    <span style={O.badge(`${color}20`, color)}>{label}</span>
+                  </div>
+                  <div style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace", marginBottom: 10 }}>
+                    📅 Due: {r.dueDate.toLocaleDateString("en-KE", { day: "numeric", month: "long", year: "numeric" })} · Every {r.interval.months} months
+                  </div>
+                  <button
+                    onClick={() => sendReminder(r)}
+                    style={{ ...O.actionBtn(color), width: "100%", padding: "10px", fontSize: 11 }}>
+                    💬 Send WhatsApp Reminder
+                  </button>
+                </div>
+              );
+            })
+          }
+        </>
+      ) : (
+        loading ? <div style={O.emptyState}>⟳ Loading jobs from Firebase...</div>
+          : jobLists[ownerTab]?.length === 0 ? <div style={O.emptyState}>{ownerTab === "inbox" ? "No pending jobs 🎉\nAll caught up!" : `No ${ownerTab} jobs`}</div>
+          : jobLists[ownerTab]?.map(job => <JobCard key={job.id} job={job} />)
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // QUOTE GENERATOR
 // ═══════════════════════════════════════════════════════════════════════════════
 const QuotePage = ({ cars, activeCar, clientHistory, setClientHistory }) => {
@@ -199,8 +827,6 @@ const QuotePage = ({ cars, activeCar, clientHistory, setClientHistory }) => {
       `\n_This quote is valid for 7 days. Prices exclude parts unless stated._`
     );
     window.open(`https://wa.me/${clientPhone ? "254" + clientPhone.replace(/^0/, "") : MECHANIC.whatsapp}?text=${msg}`, "_blank");
-
-    // Save to client history
     if (clientName) {
       const record = { id: Date.now(), clientName, clientPhone, clientCar, items, total, date: today(), quoteNo, type: "quote" };
       setClientHistory([...clientHistory, record]);
@@ -213,8 +839,6 @@ const QuotePage = ({ cars, activeCar, clientHistory, setClientHistory }) => {
     <div style={{ padding: "24px 16px 100px" }}>
       <h2 style={S.h1}>Quote Generator</h2>
       <p style={S.sub}>Build & send professional quotes via WhatsApp</p>
-
-      {/* Client Details */}
       <div style={S.card}>
         <p style={{ color: "#f97316", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 12 }}>👤 CLIENT DETAILS</p>
         <span style={S.lbl}>CLIENT NAME</span>
@@ -224,8 +848,6 @@ const QuotePage = ({ cars, activeCar, clientHistory, setClientHistory }) => {
         <span style={S.lbl}>VEHICLE</span>
         <input placeholder="Toyota Axio 2016 KDG 123A" value={clientCar} onChange={e => setClientCar(e.target.value)} style={S.input} />
       </div>
-
-      {/* Line Items */}
       <div style={S.card}>
         <p style={{ color: "#f97316", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 12 }}>🔧 SERVICES & PARTS</p>
         {items.map((it, i) => (
@@ -238,26 +860,16 @@ const QuotePage = ({ cars, activeCar, clientHistory, setClientHistory }) => {
               <option value="">Select service...</option>
               {QUOTE_SERVICES.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
             </select>
-            {it.service === "Custom Item" && (
-              <input placeholder="Describe item..." value={it.custom} onChange={e => updateItem(i, "custom", e.target.value)} style={{ ...S.input, marginBottom: 6 }} />
-            )}
+            {it.service === "Custom Item" && <input placeholder="Describe item..." value={it.custom} onChange={e => updateItem(i, "custom", e.target.value)} style={{ ...S.input, marginBottom: 6 }} />}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: 8 }}>
-              <div>
-                <span style={S.lbl}>PRICE (KES)</span>
-                <input type="number" placeholder="0" value={it.price} onChange={e => updateItem(i, "price", e.target.value)} style={{ ...S.input, marginBottom: 0 }} />
-              </div>
-              <div>
-                <span style={S.lbl}>QTY</span>
-                <input type="number" min="1" value={it.qty} onChange={e => updateItem(i, "qty", e.target.value)} style={{ ...S.input, marginBottom: 0 }} />
-              </div>
+              <div><span style={S.lbl}>PRICE (KES)</span><input type="number" placeholder="0" value={it.price} onChange={e => updateItem(i, "price", e.target.value)} style={{ ...S.input, marginBottom: 0 }} /></div>
+              <div><span style={S.lbl}>QTY</span><input type="number" min="1" value={it.qty} onChange={e => updateItem(i, "qty", e.target.value)} style={{ ...S.input, marginBottom: 0 }} /></div>
             </div>
             {it.price && <p style={{ color: "#f97316", fontSize: 11, fontFamily: "'DM Mono', monospace", marginTop: 4 }}>= {KES((parseFloat(it.price) || 0) * (parseInt(it.qty) || 1))}</p>}
           </div>
         ))}
         <button onClick={addItem} style={S.ghost}>+ Add Another Item</button>
       </div>
-
-      {/* Notes & VAT */}
       <div style={S.card}>
         <span style={S.lbl}>NOTES (OPTIONAL)</span>
         <input placeholder="e.g. Parts not included, labour only" value={notes} onChange={e => setNotes(e.target.value)} style={S.input} />
@@ -266,8 +878,6 @@ const QuotePage = ({ cars, activeCar, clientHistory, setClientHistory }) => {
           <span style={{ color: "#888", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>Include VAT (16%)</span>
         </button>
       </div>
-
-      {/* Total */}
       <div style={{ ...S.card, border: "1px solid #f9731640", background: "linear-gradient(135deg, #1a0f00, #0f0f0f)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <p style={{ color: "#555", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>Subtotal</p>
@@ -283,10 +893,7 @@ const QuotePage = ({ cars, activeCar, clientHistory, setClientHistory }) => {
         </div>
         <p style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace", marginTop: 4 }}>Quote No: {quoteNo}</p>
       </div>
-
-      <button onClick={sendQuote} style={S.btn}>
-        {sent ? "✓ Quote Sent via WhatsApp!" : "📤 Send Quote via WhatsApp"}
-      </button>
+      <button onClick={sendQuote} style={S.btn}>{sent ? "✓ Quote Sent via WhatsApp!" : "📤 Send Quote via WhatsApp"}</button>
     </div>
   );
 };
@@ -297,8 +904,6 @@ const QuotePage = ({ cars, activeCar, clientHistory, setClientHistory }) => {
 const ClientHistoryPage = ({ clientHistory, setClientHistory }) => {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
-
-  // Group by client name
   const grouped = {};
   clientHistory.forEach(r => {
     const key = r.clientName || "Unknown";
@@ -307,35 +912,20 @@ const ClientHistoryPage = ({ clientHistory, setClientHistory }) => {
   });
   const clients = Object.values(grouped).filter(c => c.name.toLowerCase().includes(search.toLowerCase()) || (c.phone || "").includes(search));
   const totalRevenue = clientHistory.reduce((s, r) => s + (r.total || 0), 0);
-
   return (
     <div style={{ padding: "24px 16px 100px" }}>
       <h2 style={S.h1}>Client History</h2>
       <p style={S.sub}>Every client. Every job. All in one place.</p>
-
-      {/* Summary Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
-        {[
-          { label: "CLIENTS", val: Object.keys(grouped).length, color: "#f97316" },
-          { label: "JOBS", val: clientHistory.length, color: "#3b82f6" },
-          { label: "REVENUE", val: KES(totalRevenue).replace("KES ", ""), color: "#22c55e" },
-        ].map((s, i) => (
+        {[{ label: "CLIENTS", val: Object.keys(grouped).length, color: "#f97316" }, { label: "JOBS", val: clientHistory.length, color: "#3b82f6" }, { label: "REVENUE", val: KES(totalRevenue).replace("KES ", ""), color: "#22c55e" }].map((s, i) => (
           <div key={i} style={{ background: "#141414", border: "1px solid #1e1e1e", borderRadius: 14, padding: "12px 10px", textAlign: "center" }}>
             <p style={{ color: s.color, fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 700 }}>{s.val}</p>
             <p style={{ color: "#333", fontSize: 9, fontFamily: "'DM Mono', monospace", marginTop: 2 }}>{s.label}</p>
           </div>
         ))}
       </div>
-
       <input placeholder="Search client name or phone..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...S.input, marginBottom: 14 }} />
-
-      {clients.length === 0 && (
-        <div style={{ textAlign: "center", padding: 40, color: "#2a2a2a" }}>
-          <div style={{ fontSize: 48 }}>👤</div>
-          <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, marginTop: 10, color: "#333" }}>No clients yet. Send quotes to start building history.</p>
-        </div>
-      )}
-
+      {clients.length === 0 && <div style={{ textAlign: "center", padding: 40, color: "#2a2a2a" }}><div style={{ fontSize: 48 }}>👤</div><p style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, marginTop: 10, color: "#333" }}>No clients yet. Send quotes to start building history.</p></div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {clients.map((client, i) => {
           const totalSpent = client.jobs.reduce((s, j) => s + (j.total || 0), 0);
@@ -356,7 +946,6 @@ const ClientHistoryPage = ({ clientHistory, setClientHistory }) => {
                   <p style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{lastJob?.date}</p>
                 </div>
               </div>
-
               {selected?.name === client.name && (
                 <div style={{ marginTop: 14, borderTop: "1px solid #1e1e1e", paddingTop: 14 }}>
                   <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
@@ -384,77 +973,43 @@ const ClientHistoryPage = ({ clientHistory, setClientHistory }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// REFERRAL SYSTEM
+// REFERRAL
 // ═══════════════════════════════════════════════════════════════════════════════
 const ReferralPage = ({ user }) => {
   const referralCode = user.email.split("@")[0].toUpperCase().slice(0, 6) + "BRM";
   const [copied, setCopied] = useState(false);
-
-  const shareMsg = encodeURIComponent(
-    `🚗 Hey! I use this app to manage my car maintenance in Nairobi.\n\n` +
-    `It's connected to *Michael (Bromine) Muchai* — a trusted mechanic in Ngara.\n\n` +
-    `✅ Warning light guide\n✅ Service reminders\n✅ Emergency help 24/7\n✅ AI car diagnosis\n\n` +
-    `Use my referral code *${referralCode}* when signing up to get *${MECHANIC.referralDiscount}% off* your first service!\n\n` +
-    `Download: ${MECHANIC.appUrl}`
-  );
-
-  const copy = () => {
-    navigator.clipboard?.writeText(referralCode).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
-  };
-
+  const shareMsg = encodeURIComponent(`🚗 Hey! I use this app to manage my car maintenance in Nairobi.\n\nIt's connected to *Michael (Bromine) Muchai* — a trusted mechanic in Ngara.\n\n✅ Warning light guide\n✅ Service reminders\n✅ Emergency help 24/7\n✅ AI car diagnosis\n\nUse my referral code *${referralCode}* when signing up to get *${MECHANIC.referralDiscount}% off* your first service!\n\nDownload: ${MECHANIC.appUrl}`);
+  const copy = () => { navigator.clipboard?.writeText(referralCode).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }); };
   return (
     <div style={{ padding: "24px 16px 100px" }}>
       <h2 style={S.h1}>Refer & Earn</h2>
       <p style={S.sub}>Share the app. Your friends save money. You earn discounts.</p>
-
-      {/* Referral Card */}
       <div style={{ background: "linear-gradient(135deg, #1a0f00 0%, #0f0f0f 50%, #0a1a00 100%)", border: "1px solid #f9731640", borderRadius: 22, padding: 24, marginBottom: 16, textAlign: "center", position: "relative", overflow: "hidden" }}>
-        <div style={{ position: "absolute", top: -40, right: -40, width: 160, height: 160, borderRadius: "50%", border: "1px solid #f9731615", pointerEvents: "none" }} />
         <p style={{ color: "#555", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 8 }}>YOUR REFERRAL CODE</p>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 16 }}>
           <p style={{ fontFamily: "'Playfair Display', serif", fontSize: 36, color: "#f97316", letterSpacing: "0.1em" }}>{referralCode}</p>
-          <button onClick={copy} style={{ padding: "8px 14px", borderRadius: 10, background: copied ? "#22c55e20" : "#f9731620", border: `1px solid ${copied ? "#22c55e40" : "#f9731640"}`, color: copied ? "#22c55e" : "#f97316", fontFamily: "'DM Mono', monospace", fontSize: 11, cursor: "pointer" }}>
-            {copied ? "✓ COPIED" : "COPY"}
-          </button>
+          <button onClick={copy} style={{ padding: "8px 14px", borderRadius: 10, background: copied ? "#22c55e20" : "#f9731620", border: `1px solid ${copied ? "#22c55e40" : "#f9731640"}`, color: copied ? "#22c55e" : "#f97316", fontFamily: "'DM Mono', monospace", fontSize: 11, cursor: "pointer" }}>{copied ? "✓ COPIED" : "COPY"}</button>
         </div>
         <p style={{ color: "#555", fontSize: 12, lineHeight: 1.6 }}>When a friend signs up with your code, they get <span style={{ color: "#22c55e" }}>{MECHANIC.referralDiscount}% off</span> their first service with Michael.</p>
-
-        {user.referredBy && (
-          <div style={{ background: "#22c55e10", border: "1px solid #22c55e30", borderRadius: 12, padding: "8px 14px", marginTop: 14 }}>
-            <p style={{ color: "#22c55e", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>✓ You were referred by: {user.referredBy} — {user.discountEarned}% discount active!</p>
-          </div>
-        )}
+        {user.referredBy && <div style={{ background: "#22c55e10", border: "1px solid #22c55e30", borderRadius: 12, padding: "8px 14px", marginTop: 14 }}><p style={{ color: "#22c55e", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>✓ You were referred by: {user.referredBy} — {user.discountEarned}% discount active!</p></div>}
       </div>
-
-      {/* How It Works */}
       <div style={S.card}>
         <p style={{ color: "#f97316", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 14 }}>HOW IT WORKS</p>
-        {[
-          { step: "1", text: "Copy your referral code above" },
-          { step: "2", text: `Share it with friends via WhatsApp` },
-          { step: "3", text: "They sign up & enter your code" },
-          { step: "4", text: `They get ${MECHANIC.referralDiscount}% off their first service with Michael` },
-        ].map((s, i) => (
+        {[{ step: "1", text: "Copy your referral code above" }, { step: "2", text: "Share it with friends via WhatsApp" }, { step: "3", text: "They sign up & enter your code" }, { step: "4", text: `They get ${MECHANIC.referralDiscount}% off their first service with Michael` }].map((s, i) => (
           <div key={i} style={{ display: "flex", gap: 12, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #1a1a1a" }}>
             <span style={{ width: 28, height: 28, borderRadius: 8, background: "#f9731620", color: "#f97316", fontFamily: "'DM Mono', monospace", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{s.step}</span>
             <p style={{ color: "#888", fontSize: 13 }}>{s.text}</p>
           </div>
         ))}
       </div>
-
-      {/* Share Buttons */}
-      <button onClick={() => window.open(`https://wa.me/?text=${shareMsg}`, "_blank")} style={S.btn}>
-        💬 Share via WhatsApp
-      </button>
-      <button onClick={() => { navigator.share ? navigator.share({ title: "Car Care KE", text: decodeURIComponent(shareMsg) }) : window.open(`https://wa.me/?text=${shareMsg}`, "_blank"); }} style={S.ghost}>
-        🔗 Share via Other Apps
-      </button>
+      <button onClick={() => window.open(`https://wa.me/?text=${shareMsg}`, "_blank")} style={S.btn}>💬 Share via WhatsApp</button>
+      <button onClick={() => { navigator.share ? navigator.share({ title: "Car Care KE", text: decodeURIComponent(shareMsg) }) : window.open(`https://wa.me/?text=${shareMsg}`, "_blank"); }} style={S.ghost}>🔗 Share via Other Apps</button>
     </div>
   );
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// REVIEWS & RATINGS
+// REVIEWS
 // ═══════════════════════════════════════════════════════════════════════════════
 const ReviewsPage = ({ reviews, setReviews, user }) => {
   const [showForm, setShowForm] = useState(false);
@@ -463,33 +1018,22 @@ const ReviewsPage = ({ reviews, setReviews, user }) => {
   const userReviewed = reviews.some(r => r.userEmail === user.email);
   const avgRating = reviews.length ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1) : "5.0";
   const dist = [5, 4, 3, 2, 1].map(star => ({ star, count: reviews.filter(r => r.rating === star).length }));
-
   const submit = () => {
     if (!form.comment) return;
     const review = { id: Date.now(), userName: user.name, userEmail: user.email, rating: form.rating, comment: form.comment, service: form.service, date: today() };
-    const updated = [...reviews, review];
-    setReviews(updated);
-    // Share to WhatsApp
+    setReviews([...reviews, review]);
     window.open(`https://wa.me/${MECHANIC.whatsapp}?text=${encodeURIComponent(`⭐ NEW REVIEW from ${user.name}\nRating: ${"★".repeat(form.rating)}${"☆".repeat(5 - form.rating)}\nService: ${form.service || "General"}\n\n"${form.comment}"`)}`, "_blank");
-    setSubmitted(true);
-    setShowForm(false);
+    setSubmitted(true); setShowForm(false);
   };
-
   const Stars = ({ rating, size = 16, interactive = false, onRate }) => (
     <div style={{ display: "flex", gap: 2 }}>
-      {[1, 2, 3, 4, 5].map(s => (
-        <button key={s} onClick={() => interactive && onRate && onRate(s)}
-          style={{ background: "transparent", border: "none", cursor: interactive ? "pointer" : "default", fontSize: size, color: s <= rating ? "#f97316" : "#333", padding: 0 }}>★</button>
-      ))}
+      {[1, 2, 3, 4, 5].map(s => <button key={s} onClick={() => interactive && onRate && onRate(s)} style={{ background: "transparent", border: "none", cursor: interactive ? "pointer" : "default", fontSize: size, color: s <= rating ? "#f97316" : "#333", padding: 0 }}>★</button>)}
     </div>
   );
-
   return (
     <div style={{ padding: "24px 16px 100px" }}>
       <h2 style={S.h1}>Reviews & Ratings</h2>
       <p style={S.sub}>Client feedback for Michael (Bromine) Muchai</p>
-
-      {/* Rating Summary */}
       <div style={{ ...S.card, border: "1px solid #f9731640", display: "flex", gap: 16, alignItems: "center", marginBottom: 16 }}>
         <div style={{ textAlign: "center", flexShrink: 0 }}>
           <p style={{ fontFamily: "'Playfair Display', serif", fontSize: 48, color: "#f97316", lineHeight: 1 }}>{avgRating}</p>
@@ -508,47 +1052,26 @@ const ReviewsPage = ({ reviews, setReviews, user }) => {
           ))}
         </div>
       </div>
-
-      {!userReviewed && !submitted && (
-        <button onClick={() => setShowForm(!showForm)} style={S.btn}>
-          {showForm ? "✕ Cancel" : "⭐ Leave a Review"}
-        </button>
-      )}
+      {!userReviewed && !submitted && <button onClick={() => setShowForm(!showForm)} style={S.btn}>{showForm ? "✕ Cancel" : "⭐ Leave a Review"}</button>}
       {submitted && <div style={{ ...S.card, border: "1px solid #22c55e40", textAlign: "center" }}><p style={{ color: "#22c55e", fontFamily: "'DM Mono', monospace", fontSize: 13 }}>✓ Thank you! Your review has been submitted.</p></div>}
-
       {showForm && (
         <div style={{ ...S.card, border: "1px solid #f9731640", marginBottom: 14 }}>
           <p style={{ color: "#f97316", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 14 }}>YOUR REVIEW</p>
           <span style={S.lbl}>YOUR RATING</span>
-          <div style={{ marginBottom: 12 }}>
-            <Stars rating={form.rating} size={32} interactive onRate={r => setForm({ ...form, rating: r })} />
-          </div>
+          <div style={{ marginBottom: 12 }}><Stars rating={form.rating} size={32} interactive onRate={r => setForm({ ...form, rating: r })} /></div>
           <span style={S.lbl}>SERVICE RECEIVED</span>
-          <select value={form.service} onChange={e => setForm({ ...form, service: e.target.value })} style={S.input}>
-            <option value="">Select service...</option>
-            {SERVICE_TYPES.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
+          <select value={form.service} onChange={e => setForm({ ...form, service: e.target.value })} style={S.input}><option value="">Select service...</option>{SERVICE_TYPES.map(s => <option key={s} value={s}>{s}</option>)}</select>
           <span style={S.lbl}>YOUR COMMENT</span>
           <textarea placeholder="Share your experience with Michael..." value={form.comment} onChange={e => setForm({ ...form, comment: e.target.value })} style={{ ...S.input, minHeight: 90, resize: "vertical" }} />
           <button onClick={submit} disabled={!form.comment} style={{ ...S.btn, opacity: !form.comment ? 0.5 : 1 }}>Submit Review</button>
         </div>
       )}
-
-      {/* Default reviews + user reviews */}
-      {[
-        { id: 0, userName: "James Waweru", rating: 5, comment: "Michael diagnosed my Toyota Axio's engine problem in under 10 minutes. Fixed it same day. Fair price, no surprises. Highly recommend!", service: "Engine Diagnostics", date: "2026-02-15" },
-        { id: 0, userName: "Grace Akinyi", rating: 5, comment: "Best mechanic in Ngara. He explained everything clearly and even showed me the worn brake pads before replacing them. Very transparent.", service: "Brake Service", date: "2026-02-28" },
-        { id: 0, userName: "David Mwangi", rating: 5, comment: "My matatu broke down on Thika Road at night. Michael came for a mobile visit within the hour. Lifesaver! Will always call him.", service: "Emergency Repair", date: "2026-03-01" },
-        ...reviews
-      ].map((r, i) => (
+      {[{ id: 0, userName: "James Waweru", rating: 5, comment: "Michael diagnosed my Toyota Axio's engine problem in under 10 minutes. Fixed it same day. Fair price, no surprises. Highly recommend!", service: "Engine Diagnostics", date: "2026-02-15" }, { id: 0, userName: "Grace Akinyi", rating: 5, comment: "Best mechanic in Ngara. He explained everything clearly and even showed me the worn brake pads before replacing them. Very transparent.", service: "Brake Service", date: "2026-02-28" }, { id: 0, userName: "David Mwangi", rating: 5, comment: "My matatu broke down on Thika Road at night. Michael came for a mobile visit within the hour. Lifesaver! Will always call him.", service: "Emergency Repair", date: "2026-03-01" }, ...reviews].map((r, i) => (
         <div key={i} style={{ ...S.card, marginBottom: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <div style={{ width: 36, height: 36, borderRadius: 10, background: "#f9731620", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>👤</div>
-              <div>
-                <p style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>{r.userName}</p>
-                <p style={{ color: "#444", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{r.service || "General"}</p>
-              </div>
+              <div><p style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>{r.userName}</p><p style={{ color: "#444", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{r.service || "General"}</p></div>
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ display: "flex", gap: 1 }}>{[1, 2, 3, 4, 5].map(s => <span key={s} style={{ color: s <= r.rating ? "#f97316" : "#333", fontSize: 12 }}>★</span>)}</div>
@@ -563,44 +1086,32 @@ const ReviewsPage = ({ reviews, setReviews, user }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// INSURANCE TRACKER
+// INSURANCE
 // ═══════════════════════════════════════════════════════════════════════════════
 const InsurancePage = ({ cars, insurance, setInsurance }) => {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ carId: "", insurer: "", type: "Comprehensive", policyNo: "", startDate: "", endDate: "", cost: "", phone: "" });
   const f = k => e => setForm({ ...form, [k]: e.target.value });
-
   const add = () => {
     if (!form.endDate) return;
     setInsurance([...insurance, { ...form, id: Date.now() }]);
     setForm({ carId: "", insurer: "", type: "Comprehensive", policyNo: "", startDate: "", endDate: "", cost: "", phone: "" });
     setShowForm(false);
   };
-
   const remove = (id) => setInsurance(insurance.filter(i => i.id !== id));
-
   return (
     <div style={{ padding: "24px 16px 100px" }}>
       <h2 style={S.h1}>Insurance Tracker</h2>
       <p style={S.sub}>Never let your insurance lapse. Get reminders before it expires.</p>
-
-      <button onClick={() => setShowForm(!showForm)} style={S.btn}>
-        {showForm ? "✕ Cancel" : "+ Add Insurance Policy"}
-      </button>
-
+      <button onClick={() => setShowForm(!showForm)} style={S.btn}>{showForm ? "✕ Cancel" : "+ Add Insurance Policy"}</button>
       {showForm && (
         <div style={{ ...S.card, border: "1px solid #f9731640" }}>
           <span style={S.lbl}>SELECT CAR</span>
-          <select value={form.carId} onChange={f("carId")} style={S.input}>
-            <option value="">Choose car...</option>
-            {cars.map(c => <option key={c.id} value={c.id}>{c.make} {c.model} {c.plate ? `(${c.plate})` : ""}</option>)}
-          </select>
+          <select value={form.carId} onChange={f("carId")} style={S.input}><option value="">Choose car...</option>{cars.map(c => <option key={c.id} value={c.id}>{c.make} {c.model} {c.plate ? `(${c.plate})` : ""}</option>)}</select>
           <span style={S.lbl}>INSURANCE COMPANY</span>
           <input placeholder="e.g. Jubilee Insurance, AAR, APA..." value={form.insurer} onChange={f("insurer")} style={S.input} />
           <span style={S.lbl}>POLICY TYPE</span>
-          <select value={form.type} onChange={f("type")} style={S.input}>
-            {INSURANCE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
+          <select value={form.type} onChange={f("type")} style={S.input}>{INSURANCE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select>
           <span style={S.lbl}>POLICY NUMBER</span>
           <input placeholder="e.g. POL/2024/12345" value={form.policyNo} onChange={f("policyNo")} style={S.input} />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -614,20 +1125,12 @@ const InsurancePage = ({ cars, insurance, setInsurance }) => {
           <button onClick={add} style={S.btn}>Save Insurance</button>
         </div>
       )}
-
-      {insurance.length === 0 && !showForm && (
-        <div style={{ textAlign: "center", padding: 40, color: "#2a2a2a" }}>
-          <div style={{ fontSize: 48 }}>🛡️</div>
-          <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, marginTop: 10, color: "#333" }}>No policies added yet</p>
-        </div>
-      )}
-
+      {insurance.length === 0 && !showForm && <div style={{ textAlign: "center", padding: 40, color: "#2a2a2a" }}><div style={{ fontSize: 48 }}>🛡️</div><p style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, marginTop: 10, color: "#333" }}>No policies added yet</p></div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {insurance.map(pol => {
           const days = daysFromNow(pol.endDate);
           const car = cars.find(c => c.id === pol.carId);
-          const isExpired = days < 0;
-          const isUrgent = days >= 0 && days <= 30;
+          const isExpired = days < 0; const isUrgent = days >= 0 && days <= 30;
           const color = isExpired ? "#ef4444" : isUrgent ? "#f59e0b" : "#22c55e";
           return (
             <div key={pol.id} style={{ ...S.card, border: `1px solid ${color}30`, marginBottom: 0 }}>
@@ -635,9 +1138,7 @@ const InsurancePage = ({ cars, insurance, setInsurance }) => {
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
                     <p style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>{pol.insurer || "Insurance Policy"}</p>
-                    <span style={{ fontSize: 9, background: color + "20", color, padding: "2px 8px", borderRadius: 20, fontFamily: "'DM Mono', monospace", border: `1px solid ${color}40` }}>
-                      {isExpired ? "EXPIRED" : isUrgent ? `${days}D LEFT` : "ACTIVE"}
-                    </span>
+                    <span style={{ fontSize: 9, background: color + "20", color, padding: "2px 8px", borderRadius: 20, fontFamily: "'DM Mono', monospace", border: `1px solid ${color}40` }}>{isExpired ? "EXPIRED" : isUrgent ? `${days}D LEFT` : "ACTIVE"}</span>
                   </div>
                   <p style={{ color: "#444", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{pol.type} • {car ? `${car.make} ${car.model}` : "Car"}</p>
                   {pol.policyNo && <p style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>Policy: {pol.policyNo}</p>}
@@ -645,26 +1146,11 @@ const InsurancePage = ({ cars, insurance, setInsurance }) => {
                 <button onClick={() => remove(pol.id)} style={{ color: "#333", background: "transparent", border: "none", fontSize: 16, cursor: "pointer" }}>🗑</button>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <div style={{ background: "#0d0d0d", borderRadius: 10, padding: 10 }}>
-                  <p style={S.lbl}>EXPIRES</p>
-                  <p style={{ color, fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>{pol.endDate}</p>
-                </div>
-                <div style={{ background: "#0d0d0d", borderRadius: 10, padding: 10 }}>
-                  <p style={S.lbl}>PREMIUM</p>
-                  <p style={{ color: "#f97316", fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>{pol.cost ? KES(pol.cost) : "—"}</p>
-                </div>
+                <div style={{ background: "#0d0d0d", borderRadius: 10, padding: 10 }}><p style={S.lbl}>EXPIRES</p><p style={{ color, fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>{pol.endDate}</p></div>
+                <div style={{ background: "#0d0d0d", borderRadius: 10, padding: 10 }}><p style={S.lbl}>PREMIUM</p><p style={{ color: "#f97316", fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>{pol.cost ? KES(pol.cost) : "—"}</p></div>
               </div>
-              {isUrgent && (
-                <button onClick={() => window.open(`https://wa.me/${MECHANIC.whatsapp}?text=${encodeURIComponent(`Hello Michael! My ${pol.type} insurance for my ${car?.make || "car"} expires on ${pol.endDate}. Can you advise?`)}`, "_blank")}
-                  style={{ ...S.btn, marginTop: 10, marginBottom: 0, background: "#f59e0b" }}>
-                  ⚠️ Insurance Expiring — Get Help Renewing
-                </button>
-              )}
-              {isExpired && (
-                <div style={{ background: "#ef444415", border: "1px solid #ef444430", borderRadius: 10, padding: 10, marginTop: 10 }}>
-                  <p style={{ color: "#ef4444", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>⛔ EXPIRED — Driving without valid insurance is illegal in Kenya. Renew immediately!</p>
-                </div>
-              )}
+              {isUrgent && <button onClick={() => window.open(`https://wa.me/${MECHANIC.whatsapp}?text=${encodeURIComponent(`Hello Michael! My ${pol.type} insurance for my ${car?.make || "car"} expires on ${pol.endDate}. Can you advise?`)}`, "_blank")} style={{ ...S.btn, marginTop: 10, marginBottom: 0, background: "#f59e0b" }}>⚠️ Insurance Expiring — Get Help Renewing</button>}
+              {isExpired && <div style={{ background: "#ef444415", border: "1px solid #ef444430", borderRadius: 10, padding: 10, marginTop: 10 }}><p style={{ color: "#ef4444", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>⛔ EXPIRED — Driving without valid insurance is illegal in Kenya. Renew immediately!</p></div>}
             </div>
           );
         })}
@@ -681,33 +1167,25 @@ const RoadSafetyPage = () => {
   const cats = ["All", "Legal", "Safety", "PSV"];
   const filtered = filter === "All" ? ROAD_SAFETY_TIPS : ROAD_SAFETY_TIPS.filter(t => t.category === filter);
   const [open, setOpen] = useState(null);
-
   return (
     <div style={{ padding: "24px 16px 100px" }}>
       <h2 style={S.h1}>Road Safety & Laws</h2>
       <p style={S.sub}>Kenya traffic laws, fines & safety tips every driver should know.</p>
-
       <div style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto" }}>
-        {cats.map(c => (
-          <button key={c} onClick={() => setFilter(c)} style={{ whiteSpace: "nowrap", padding: "6px 14px", borderRadius: 20, fontSize: 10, fontFamily: "'DM Mono', monospace", fontWeight: 600, background: filter === c ? "#f97316" : "#141414", color: filter === c ? "#fff" : "#555", border: `1px solid ${filter === c ? "#f97316" : "#2a2a2a"}`, cursor: "pointer" }}>{c}</button>
-        ))}
+        {cats.map(c => <button key={c} onClick={() => setFilter(c)} style={{ whiteSpace: "nowrap", padding: "6px 14px", borderRadius: 20, fontSize: 10, fontFamily: "'DM Mono', monospace", fontWeight: 600, background: filter === c ? "#f97316" : "#141414", color: filter === c ? "#fff" : "#555", border: `1px solid ${filter === c ? "#f97316" : "#2a2a2a"}`, cursor: "pointer" }}>{c}</button>)}
       </div>
-
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {filtered.map((tip, i) => (
-          <button key={i} onClick={() => setOpen(open === i ? null : i)}
-            style={{ ...S.card, cursor: "pointer", textAlign: "left", border: `1px solid ${open === i ? "#f9731640" : "#1e1e1e"}`, marginBottom: 0 }}>
+          <button key={i} onClick={() => setOpen(open === i ? null : i)} style={{ ...S.card, cursor: "pointer", textAlign: "left", border: `1px solid ${open === i ? "#f9731640" : "#1e1e1e"}`, marginBottom: 0 }}>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               <span style={{ fontSize: 28, flexShrink: 0 }}>{tip.icon}</span>
               <div style={{ flex: 1 }}>
                 <p style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>{tip.title}</p>
-                <span style={{ fontSize: 9, background: tip.category === "Legal" ? "#3b82f620" : tip.category === "PSV" ? "#8b5cf620" : "#22c55e20", color: tip.category === "Legal" ? "#3b82f6" : tip.category === "PSV" ? "#8b5cf6" : "#22c55e", padding: "2px 8px", borderRadius: 20, fontFamily: "'DM Mono', monospace", border: `1px solid transparent` }}>{tip.category}</span>
+                <span style={{ fontSize: 9, background: tip.category === "Legal" ? "#3b82f620" : tip.category === "PSV" ? "#8b5cf620" : "#22c55e20", color: tip.category === "Legal" ? "#3b82f6" : tip.category === "PSV" ? "#8b5cf6" : "#22c55e", padding: "2px 8px", borderRadius: 20, fontFamily: "'DM Mono', monospace" }}>{tip.category}</span>
               </div>
               <span style={{ color: "#444", fontSize: 16 }}>{open === i ? "▲" : "▼"}</span>
             </div>
-            {open === i && (
-              <p style={{ color: "#888", fontSize: 13, lineHeight: 1.7, marginTop: 12, paddingTop: 12, borderTop: "1px solid #1e1e1e" }}>{tip.tip}</p>
-            )}
+            {open === i && <p style={{ color: "#888", fontSize: 13, lineHeight: 1.7, marginTop: 12, paddingTop: 12, borderTop: "1px solid #1e1e1e" }}>{tip.tip}</p>}
           </button>
         ))}
       </div>
@@ -716,35 +1194,26 @@ const RoadSafetyPage = () => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PARTS LOCATOR
+// PARTS
 // ═══════════════════════════════════════════════════════════════════════════════
 const PartsPage = () => {
   const [search, setSearch] = useState("");
   const filtered = PARTS_SHOPS.filter(s => s.name.toLowerCase().includes(search.toLowerCase()) || s.area.toLowerCase().includes(search.toLowerCase()) || s.speciality.toLowerCase().includes(search.toLowerCase()));
-
   return (
     <div style={{ padding: "24px 16px 100px" }}>
       <h2 style={S.h1}>Parts & Tyre Shops</h2>
       <p style={S.sub}>Trusted spare parts shops across Nairobi.</p>
-
       <div style={{ ...S.card, border: "1px solid #f9731630", marginBottom: 14 }}>
         <p style={{ color: "#f97316", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 6 }}>💡 PRO TIP FROM MICHAEL</p>
         <p style={{ color: "#666", fontSize: 12, lineHeight: 1.6 }}>Always buy parts from a trusted supplier — counterfeit parts are common in Nairobi. Ask Michael to source parts for you directly to guarantee quality.</p>
-        <button onClick={() => window.open(`https://wa.me/${MECHANIC.whatsapp}?text=${encodeURIComponent("Hello Michael! Can you help me source quality spare parts for my car?")}`)} style={{ ...S.btn, marginTop: 10, marginBottom: 0 }}>
-          💬 Ask Michael to Source Parts
-        </button>
+        <button onClick={() => window.open(`https://wa.me/${MECHANIC.whatsapp}?text=${encodeURIComponent("Hello Michael! Can you help me source quality spare parts for my car?")}`)} style={{ ...S.btn, marginTop: 10, marginBottom: 0 }}>💬 Ask Michael to Source Parts</button>
       </div>
-
       <input placeholder="Search by name, area or speciality..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...S.input, marginBottom: 14 }} />
-
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {filtered.map((shop, i) => (
           <div key={i} style={S.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-              <div>
-                <p style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>{shop.name}</p>
-                <p style={{ color: "#444", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>📍 {shop.area} • 🔩 {shop.speciality}</p>
-              </div>
+              <div><p style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>{shop.name}</p><p style={{ color: "#444", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>📍 {shop.area} • 🔩 {shop.speciality}</p></div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => window.open(`tel:${shop.phone}`)} style={{ flex: 1, padding: "8px", borderRadius: 10, background: "#22c55e15", border: "1px solid #22c55e30", color: "#22c55e", fontFamily: "'DM Mono', monospace", fontSize: 11, cursor: "pointer" }}>📞 {shop.phone}</button>
@@ -758,7 +1227,7 @@ const PartsPage = () => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// REMAINING PAGES (Dashboard, Warnings, Log, Fuel, AI, Cars, Emergency, PSV)
+// DASHBOARD
 // ═══════════════════════════════════════════════════════════════════════════════
 const Dashboard = ({ user, cars, activeCar, serviceLog, setPage, insurance }) => {
   const car = cars.find(c => c.id === activeCar);
@@ -769,7 +1238,6 @@ const Dashboard = ({ user, cars, activeCar, serviceLog, setPage, insurance }) =>
   const isPSV = car?.type?.includes("Matatu") || car?.type?.includes("Bus") || car?.type?.includes("Taxi");
   const expiringInsurance = insurance.filter(p => { const d = daysFromNow(p.endDate); return d >= 0 && d <= 30; });
   const userCar = car ? `${car.make} ${car.model} ${car.year || ""}` : "";
-
   return (
     <div style={{ padding: "24px 16px 100px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
@@ -781,25 +1249,13 @@ const Dashboard = ({ user, cars, activeCar, serviceLog, setPage, insurance }) =>
           <p style={{ color: car ? "#f97316" : "#ef4444", fontSize: 10, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>{car ? `🚗 ${car.plate || car.make}` : "+ ADD CAR"}</p>
         </button>
       </div>
-
-      {/* Alerts */}
       {user.discountEarned > 0 && <div style={{ background: "#22c55e15", border: "1px solid #22c55e40", borderRadius: 14, padding: "10px 14px", marginBottom: 10 }}><p style={{ color: "#22c55e", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>🎉 You have a {user.discountEarned}% referral discount on your first service!</p></div>}
       {dueAlert && <div style={{ background: "#ef444418", border: "1px solid #ef4444", borderRadius: 14, padding: "10px 14px", marginBottom: 10 }}><p style={{ color: "#ef4444", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>⚠️ SERVICE DUE — Only {nextService - carMileage} km remaining!</p></div>}
       {expiringInsurance.length > 0 && <div style={{ background: "#f59e0b15", border: "1px solid #f59e0b40", borderRadius: 14, padding: "10px 14px", marginBottom: 10 }}><p style={{ color: "#f59e0b", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>🛡️ Insurance expiring in {daysFromNow(expiringInsurance[0].endDate)} days — tap to renew!</p></div>}
       {isPSV && <div style={{ background: "#3b82f615", border: "1px solid #3b82f640", borderRadius: 14, padding: "10px 14px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}><p style={{ color: "#3b82f6", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>🚐 PSV Mode Active</p><button onClick={() => setPage("psv")} style={{ color: "#3b82f6", fontSize: 11, fontFamily: "'DM Mono', monospace", background: "transparent", border: "1px solid #3b82f640", borderRadius: 8, padding: "3px 10px", cursor: "pointer" }}>Open →</button></div>}
-
-      {/* Stats — all 4 cards are clickable */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
-        {[
-          { label: "MILEAGE", val: carMileage ? `${carMileage.toLocaleString()} km` : "Tap to add", icon: "📍", page: "cars", hint: "Update mileage" },
-          { label: "NEXT SERVICE", val: nextService ? `${nextService.toLocaleString()} km` : "No data", icon: "🔜", alert: dueAlert, page: "log", hint: dueAlert ? "Service overdue!" : "View service log" },
-          { label: "LAST SERVICE", val: lastSvc ? lastSvc.date : "None yet", icon: "📅", page: "log", hint: "View service history" },
-          { label: "TOTAL SERVICES", val: serviceLog.filter(s => s.carId === activeCar).length || "0", icon: "📋", page: "log", hint: "View all services" },
-        ].map((st, i) => (
-          <button key={i} onClick={() => setPage(st.page)}
-            onMouseEnter={e => e.currentTarget.style.borderColor = st.alert ? "#ef4444" : "#f9731660"}
-            onMouseLeave={e => e.currentTarget.style.borderColor = st.alert ? "#ef4444" : "#1e1e1e"}
-            style={{ background: "#141414", border: `1px solid ${st.alert ? "#ef4444" : "#1e1e1e"}`, borderRadius: 16, padding: 14, textAlign: "left", cursor: "pointer", transition: "border-color 0.2s" }}>
+        {[{ label: "MILEAGE", val: carMileage ? `${carMileage.toLocaleString()} km` : "Tap to add", icon: "📍", page: "cars", hint: "Update mileage" }, { label: "NEXT SERVICE", val: nextService ? `${nextService.toLocaleString()} km` : "No data", icon: "🔜", alert: dueAlert, page: "log", hint: dueAlert ? "Service overdue!" : "View service log" }, { label: "LAST SERVICE", val: lastSvc ? lastSvc.date : "None yet", icon: "📅", page: "log", hint: "View service history" }, { label: "TOTAL SERVICES", val: serviceLog.filter(s => s.carId === activeCar).length || "0", icon: "📋", page: "log", hint: "View all services" }].map((st, i) => (
+          <button key={i} onClick={() => setPage(st.page)} style={{ background: "#141414", border: `1px solid ${st.alert ? "#ef4444" : "#1e1e1e"}`, borderRadius: 16, padding: 14, textAlign: "left", cursor: "pointer" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <span style={{ fontSize: 22 }}>{st.icon}</span>
               <span style={{ fontSize: 8, color: st.alert ? "#ef4444" : "#333", fontFamily: "'DM Mono', monospace", background: st.alert ? "#ef444415" : "#ffffff08", padding: "2px 6px", borderRadius: 6 }}>TAP →</span>
@@ -810,8 +1266,6 @@ const Dashboard = ({ user, cars, activeCar, serviceLog, setPage, insurance }) =>
           </button>
         ))}
       </div>
-
-      {/* Michael compact card */}
       <div style={{ ...S.card, border: "1px solid #f9731640", background: "linear-gradient(135deg,#1a0f00,#0f0f0f)", marginBottom: 16 }}>
         <p style={{ ...S.lbl, color: "#f97316" }}>YOUR TRUSTED MECHANIC</p>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -826,23 +1280,10 @@ const Dashboard = ({ user, cars, activeCar, serviceLog, setPage, insurance }) =>
           </div>
         </div>
       </div>
-
-      {/* Quick Actions */}
       <p style={{ ...S.lbl, marginBottom: 10 }}>QUICK ACTIONS</p>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
-        {[
-          { icon: "📋", label: "Quote Generator", page: "quote" },
-          { icon: "🤖", label: "AI Diagnosis", page: "ai" },
-          { icon: "⚠️", label: "Warning Lights", page: "warnings" },
-          { icon: "👤", label: "Client History", page: "clients" },
-          { icon: "🛡️", label: "Insurance", page: "insurance" },
-          { icon: "🆘", label: "Emergency Help", page: "emergency" },
-          { icon: "⭐", label: "Reviews", page: "reviews" },
-          { icon: "🔗", label: "Refer & Earn", page: "referral" },
-        ].map(q => (
-          <button key={q.page} onClick={() => setPage(q.page)} style={{ background: "#141414", border: "1px solid #1e1e1e", borderRadius: 16, padding: "14px 12px", textAlign: "left", cursor: "pointer" }}
-            onMouseEnter={e => e.currentTarget.style.borderColor = "#f9731640"}
-            onMouseLeave={e => e.currentTarget.style.borderColor = "#1e1e1e"}>
+        {[{ icon: "📋", label: "Quote Generator", page: "quote" }, { icon: "🤖", label: "AI Diagnosis", page: "ai" }, { icon: "⚠️", label: "Warning Lights", page: "warnings" }, { icon: "👤", label: "Client History", page: "clients" }, { icon: "🛡️", label: "Insurance", page: "insurance" }, { icon: "🆘", label: "Emergency Help", page: "emergency" }, { icon: "⭐", label: "Reviews", page: "reviews" }, { icon: "🔗", label: "Refer & Earn", page: "referral" }].map(q => (
+          <button key={q.page} onClick={() => setPage(q.page)} style={{ background: "#141414", border: "1px solid #1e1e1e", borderRadius: 16, padding: "14px 12px", textAlign: "left", cursor: "pointer" }}>
             <span style={{ fontSize: 24 }}>{q.icon}</span>
             <p style={{ color: "#ccc", fontSize: 12, fontWeight: 600, marginTop: 8, fontFamily: "'DM Mono', monospace" }}>{q.label}</p>
           </button>
@@ -852,6 +1293,9 @@ const Dashboard = ({ user, cars, activeCar, serviceLog, setPage, insurance }) =>
   );
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// WARNINGS
+// ═══════════════════════════════════════════════════════════════════════════════
 const WarningsPage = () => {
   const [sel, setSel] = useState(null);
   const [filter, setFilter] = useState("All");
@@ -861,26 +1305,15 @@ const WarningsPage = () => {
       <h2 style={S.h1}>Warning Lights</h2>
       <p style={S.sub}>Tap any light to understand it immediately.</p>
       <div style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto" }}>
-        {["All", "Low", "Medium", "Critical"].map(f => (
-          <button key={f} onClick={() => setFilter(f)} style={{ whiteSpace: "nowrap", padding: "6px 14px", borderRadius: 20, fontSize: 10, fontFamily: "'DM Mono', monospace", fontWeight: 600, background: filter === f ? (f === "Low" ? "#22c55e" : f === "Medium" ? "#f59e0b" : f === "Critical" ? "#ef4444" : "#f97316") : "#141414", color: filter === f ? "#fff" : "#555", border: `1px solid ${filter === f ? "transparent" : "#2a2a2a"}`, cursor: "pointer" }}>{f}</button>
-        ))}
+        {["All", "Low", "Medium", "Critical"].map(f => <button key={f} onClick={() => setFilter(f)} style={{ whiteSpace: "nowrap", padding: "6px 14px", borderRadius: 20, fontSize: 10, fontFamily: "'DM Mono', monospace", fontWeight: 600, background: filter === f ? (f === "Low" ? "#22c55e" : f === "Medium" ? "#f59e0b" : f === "Critical" ? "#ef4444" : "#f97316") : "#141414", color: filter === f ? "#fff" : "#555", border: `1px solid ${filter === f ? "transparent" : "#2a2a2a"}`, cursor: "pointer" }}>{f}</button>)}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 16 }}>
-        {filtered.map(w => (
-          <button key={w.id} onClick={() => setSel(w)} style={{ background: "#141414", border: `1px solid ${sel?.id === w.id ? "#f97316" : "#1e1e1e"}`, borderRadius: 14, padding: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, cursor: "pointer" }}>
-            <span style={{ fontSize: 28 }}>{w.icon}</span>
-            <p style={{ color: "#aaa", fontSize: 9, fontFamily: "'DM Mono', monospace", textAlign: "center" }}>{w.name}</p>
-            <span style={{ fontSize: 8, padding: "2px 6px", borderRadius: 20, background: SEV[w.severity].bg, color: SEV[w.severity].text, fontFamily: "'DM Mono', monospace" }}>{w.severity}</span>
-          </button>
-        ))}
+        {filtered.map(w => <button key={w.id} onClick={() => setSel(w)} style={{ background: "#141414", border: `1px solid ${sel?.id === w.id ? "#f97316" : "#1e1e1e"}`, borderRadius: 14, padding: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, cursor: "pointer" }}><span style={{ fontSize: 28 }}>{w.icon}</span><p style={{ color: "#aaa", fontSize: 9, fontFamily: "'DM Mono', monospace", textAlign: "center" }}>{w.name}</p><span style={{ fontSize: 8, padding: "2px 6px", borderRadius: 20, background: SEV[w.severity].bg, color: SEV[w.severity].text, fontFamily: "'DM Mono', monospace" }}>{w.severity}</span></button>)}
       </div>
       {sel && (
         <div style={{ ...S.card, border: `1px solid ${SEV[sel.severity].border}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <span style={{ fontSize: 36 }}>{sel.icon}</span>
-              <div><p style={{ color: "#fff", fontSize: 17, fontWeight: 700 }}>{sel.name}</p><span style={{ fontSize: 10, padding: "2px 10px", borderRadius: 20, background: SEV[sel.severity].bg, color: SEV[sel.severity].text, fontFamily: "'DM Mono', monospace" }}>{sel.severity.toUpperCase()}</span></div>
-            </div>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}><span style={{ fontSize: 36 }}>{sel.icon}</span><div><p style={{ color: "#fff", fontSize: 17, fontWeight: 700 }}>{sel.name}</p><span style={{ fontSize: 10, padding: "2px 10px", borderRadius: 20, background: SEV[sel.severity].bg, color: SEV[sel.severity].text, fontFamily: "'DM Mono', monospace" }}>{sel.severity.toUpperCase()}</span></div></div>
             <button onClick={() => setSel(null)} style={{ color: "#444", fontSize: 18, background: "transparent", border: "none", cursor: "pointer" }}>✕</button>
           </div>
           {[{ lbl: "MEANING", val: sel.meaning }, { lbl: "WHAT TO DO", val: sel.action, hi: true }, { lbl: "COST RANGE (KES)", val: sel.costRange, or: true }].map((r, i) => (
@@ -896,11 +1329,13 @@ const WarningsPage = () => {
   );
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SERVICE LOG
+// ═══════════════════════════════════════════════════════════════════════════════
 const ServiceLogPage = ({ serviceLog, setServiceLog, cars, activeCar, setCars }) => {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ date: "", mileage: "", type: "", cost: "", notes: "" });
   const f = k => e => setForm({ ...form, [k]: e.target.value });
-  const car = cars.find(c => c.id === activeCar);
   const logs = serviceLog.filter(s => s.carId === activeCar);
   const add = () => {
     if (!form.date || !form.type) return;
@@ -945,6 +1380,9 @@ const ServiceLogPage = ({ serviceLog, setServiceLog, cars, activeCar, setCars })
   );
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// AI DIAGNOSIS
+// ═══════════════════════════════════════════════════════════════════════════════
 const AIDiagPage = ({ cars, activeCar }) => {
   const [problem, setProblem] = useState("");
   const [result, setResult] = useState(null);
@@ -956,12 +1394,7 @@ const AIDiagPage = ({ cars, activeCar }) => {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: `You are Michael Muchai, expert multi-brand automotive technician Nairobi Kenya. ${car ? `Car: ${car.year || ""} ${car.make} ${car.model}` : ""}. Respond ONLY raw JSON no markdown: { "likely_causes": [2-3 strings], "severity": "Low"|"Medium"|"Critical", "what_to_do": string, "estimated_cost_kes": string, "can_drive": boolean, "swahili_summary": string }`,
-          messages: [{ role: "user", content: problem }]
-        })
+        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, system: `You are Michael Muchai, expert multi-brand automotive technician Nairobi Kenya. ${car ? `Car: ${car.year || ""} ${car.make} ${car.model}` : ""}. Respond ONLY raw JSON no markdown: { "likely_causes": [2-3 strings], "severity": "Low"|"Medium"|"Critical", "what_to_do": string, "estimated_cost_kes": string, "can_drive": boolean, "swahili_summary": string }`, messages: [{ role: "user", content: problem }] })
       });
       if (!res.ok) throw new Error("API error");
       const data = await res.json();
@@ -969,29 +1402,18 @@ const AIDiagPage = ({ cars, activeCar }) => {
       const text = data.content.map(b => b.text || "").join("");
       setResult(JSON.parse(text.replace(/```json|```/g, "").trim()));
     } catch (err) {
-      // Fallback: build a smart local diagnosis based on keywords
       const p = problem.toLowerCase();
       const isOverheat = p.includes("overheat") || p.includes("temperature") || p.includes("smoke");
       const isBrake = p.includes("brake") || p.includes("grinding") || p.includes("squeaking");
       const isElectric = p.includes("battery") || p.includes("electric") || p.includes("start") || p.includes("crank");
       const isEngine = p.includes("engine") || p.includes("noise") || p.includes("knocking") || p.includes("idle");
       const isAC = p.includes("ac") || p.includes("cooling") || p.includes("air con");
-
-      let diagnosis = {
-        likely_causes: ["Requires professional diagnostic scan", "Could be mechanical or electrical fault", "Michael can diagnose on-site accurately"],
-        severity: "Medium",
-        what_to_do: "Book Michael for a diagnostic visit. He can identify the exact problem quickly with his equipment.",
-        estimated_cost_kes: "3,000 – 15,000",
-        can_drive: true,
-        swahili_summary: "Wasiliana na Michael (Bromine) kwa uchunguzi wa gari lako haraka."
-      };
-
+      let diagnosis = { likely_causes: ["Requires professional diagnostic scan", "Could be mechanical or electrical fault", "Michael can diagnose on-site accurately"], severity: "Medium", what_to_do: "Book Michael for a diagnostic visit. He can identify the exact problem quickly with his equipment.", estimated_cost_kes: "3,000 – 15,000", can_drive: true, swahili_summary: "Wasiliana na Michael (Bromine) kwa uchunguzi wa gari lako haraka." };
       if (isOverheat) diagnosis = { likely_causes: ["Coolant level low or leak", "Radiator fan not working", "Thermostat failure"], severity: "Critical", what_to_do: "STOP driving immediately. Let engine cool for 30 mins. Check coolant level. Call Michael now.", estimated_cost_kes: "3,000 – 25,000", can_drive: false, swahili_summary: "Simama mara moja! Injini inawaka moto sana. Piga simu Michael sasa hivi." };
       else if (isBrake) diagnosis = { likely_causes: ["Brake pads worn out", "Brake disc warped or scored", "Low brake fluid"], severity: "Critical", what_to_do: "Do NOT drive until brakes are checked. Book Michael immediately for brake inspection.", estimated_cost_kes: "4,000 – 14,000", can_drive: false, swahili_summary: "Usiendelee kusafiri. Breki zako zina tatizo kubwa. Wasiliana na Michael sasa." };
       else if (isElectric) diagnosis = { likely_causes: ["Battery weak or dead", "Alternator not charging", "Starter motor fault"], severity: "Medium", what_to_do: "Check battery terminals for corrosion. If car won't start, call Michael for mobile visit.", estimated_cost_kes: "8,000 – 20,000", can_drive: true, swahili_summary: "Tatizo la betri au alternator. Michael anaweza kuja kwako kwa ziara ya simu." };
       else if (isEngine) diagnosis = { likely_causes: ["Engine oil level low", "Spark plug worn or faulty", "Engine mount loose"], severity: "Medium", what_to_do: "Check engine oil level immediately. Book a diagnostic scan with Michael to identify the fault.", estimated_cost_kes: "2,000 – 18,000", can_drive: true, swahili_summary: "Angalia kiwango cha mafuta ya injini. Panga ziara na Michael kwa uchunguzi." };
       else if (isAC) diagnosis = { likely_causes: ["Refrigerant gas low or empty", "AC compressor fault", "Cabin air filter blocked"], severity: "Low", what_to_do: "Book AC service with Michael. Usually a refrigerant refill or compressor check fixes this.", estimated_cost_kes: "3,000 – 10,000", can_drive: true, swahili_summary: "Gesi ya AC imepungua au compressor ina tatizo. Michael anaweza kurekebisha." };
-
       setResult(diagnosis);
     }
     setLoading(false);
@@ -1007,9 +1429,7 @@ const AIDiagPage = ({ cars, activeCar }) => {
         <button onClick={diagnose} disabled={loading || !problem.trim()} style={{ ...S.btn, opacity: loading || !problem.trim() ? 0.5 : 1, marginBottom: 0 }}>{loading ? "⏳ Analyzing..." : "🔍 Diagnose My Car"}</button>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
-        {["Engine won't start", "Overheating", "Brake grinding", "White smoke", "Rough idle", "Battery draining", "AC not cooling", "Car pulls to side"].map(s => (
-          <button key={s} onClick={() => setProblem(s)} style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", padding: "5px 10px", borderRadius: 20, background: "#141414", color: "#555", border: "1px solid #2a2a2a", cursor: "pointer" }}>{s}</button>
-        ))}
+        {["Engine won't start", "Overheating", "Brake grinding", "White smoke", "Rough idle", "Battery draining", "AC not cooling", "Car pulls to side"].map(s => <button key={s} onClick={() => setProblem(s)} style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", padding: "5px 10px", borderRadius: 20, background: "#141414", color: "#555", border: "1px solid #2a2a2a", cursor: "pointer" }}>{s}</button>)}
       </div>
       {result && !result.error && (
         <div style={{ ...S.card, border: `1px solid ${(sc[result.severity] || "#f97316")}40` }}>
@@ -1029,11 +1449,13 @@ const AIDiagPage = ({ cars, activeCar }) => {
           <button onClick={() => window.open(`https://wa.me/${MECHANIC.whatsapp}?text=${encodeURIComponent(`Hello Michael! AI diagnosed my car problem as: ${result.likely_causes?.join(", ")}. Estimated cost: KES ${result.estimated_cost_kes}. Please advise.`)}`)} style={{ ...S.btn, marginTop: 12, marginBottom: 0 }}>💬 Send Diagnosis to Michael</button>
         </div>
       )}
-      {result?.error && <div style={{ ...S.card, border: "1px solid #ef444440" }}><p style={{ color: "#ef4444", fontFamily: "'DM Mono', monospace", fontSize: 13 }}>{result.error}</p></div>}
     </div>
   );
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// FUEL
+// ═══════════════════════════════════════════════════════════════════════════════
 const FuelPage = () => {
   const [tank, setTank] = useState(45); const [level, setLevel] = useState(10); const [sel, setSel] = useState(0);
   const fill = tank - level; const cost = fill * FUEL_PRICES[sel].price;
@@ -1042,13 +1464,7 @@ const FuelPage = () => {
       <h2 style={S.h1}>Fuel Prices</h2>
       <p style={S.sub}>EPRA Kenya prices + fill cost calculator</p>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-        {FUEL_PRICES.map((f, i) => (
-          <button key={i} onClick={() => setSel(i)} style={{ ...S.card, border: `1px solid ${sel === i ? f.color : "#1e1e1e"}`, display: "flex", alignItems: "center", gap: 14, cursor: "pointer", marginBottom: 0 }}>
-            <span style={{ fontSize: 28 }}>{f.icon}</span>
-            <div style={{ flex: 1, textAlign: "left" }}><p style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>{f.type}</p><p style={{ color: "#444", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>Per litre</p></div>
-            <p style={{ color: f.color, fontFamily: "'DM Mono', monospace", fontSize: 18, fontWeight: 700 }}>KES {f.price.toFixed(2)}</p>
-          </button>
-        ))}
+        {FUEL_PRICES.map((f, i) => <button key={i} onClick={() => setSel(i)} style={{ ...S.card, border: `1px solid ${sel === i ? f.color : "#1e1e1e"}`, display: "flex", alignItems: "center", gap: 14, cursor: "pointer", marginBottom: 0 }}><span style={{ fontSize: 28 }}>{f.icon}</span><div style={{ flex: 1, textAlign: "left" }}><p style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>{f.type}</p><p style={{ color: "#444", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>Per litre</p></div><p style={{ color: f.color, fontFamily: "'DM Mono', monospace", fontSize: 18, fontWeight: 700 }}>KES {f.price.toFixed(2)}</p></button>)}
       </div>
       <div style={{ ...S.card, border: "1px solid #f9731640" }}>
         <p style={{ color: "#f97316", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 14 }}>⛽ FILL COST CALCULATOR</p>
@@ -1066,6 +1482,9 @@ const FuelPage = () => {
   );
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CARS
+// ═══════════════════════════════════════════════════════════════════════════════
 const CarsPage = ({ cars, setCars, activeCar, setActiveCar }) => {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", make: "", model: "", year: "", plate: "", type: "Saloon / Sedan", mileage: "" });
@@ -1086,10 +1505,7 @@ const CarsPage = ({ cars, setCars, activeCar, setActiveCar }) => {
         <div key={car.id} style={{ ...S.card, border: `1px solid ${activeCar === car.id ? "#f97316" : "#1e1e1e"}`, display: "flex", alignItems: "center", gap: 14, marginBottom: 8 }}>
           <button onClick={() => setActiveCar(car.id)} style={{ display: "flex", alignItems: "center", gap: 14, flex: 1, background: "transparent", border: "none", cursor: "pointer", textAlign: "left" }}>
             <span style={{ fontSize: 32 }}>{isPSV(car.type) ? "🚐" : "🚗"}</span>
-            <div>
-              <p style={{ color: "#fff", fontWeight: 700, fontSize: 14 }}>{car.name || `${car.make} ${car.model}`}</p>
-              <p style={{ color: "#444", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{car.plate || "No plate"} • {car.year || "—"} • {car.mileage ? `${parseInt(car.mileage).toLocaleString()} km` : "No mileage"}</p>
-            </div>
+            <div><p style={{ color: "#fff", fontWeight: 700, fontSize: 14 }}>{car.name || `${car.make} ${car.model}`}</p><p style={{ color: "#444", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{car.plate || "No plate"} • {car.year || "—"} • {car.mileage ? `${parseInt(car.mileage).toLocaleString()} km` : "No mileage"}</p></div>
           </button>
           <div style={{ display: "flex", gap: 6 }}>
             {activeCar === car.id && <span style={{ color: "#f97316", fontSize: 16 }}>✓</span>}
@@ -1100,9 +1516,7 @@ const CarsPage = ({ cars, setCars, activeCar, setActiveCar }) => {
       {cars.length === 0 && <div style={{ textAlign: "center", padding: 30 }}><div style={{ fontSize: 48 }}>🚗</div><p style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, marginTop: 10, color: "#333" }}>No cars yet</p></div>}
       <button onClick={() => setShowForm(!showForm)} style={S.btn}>{showForm ? "✕ Cancel" : "+ Add Car"}</button>
       {showForm && <div style={{ ...S.card, border: "1px solid #f9731640" }}>
-        {[["CAR NICKNAME", "name", "e.g. My Axio, Work Matatu"], ["MAKE", "make", "Toyota, Nissan, Isuzu..."], ["MODEL", "model", "Axio, Demio, NZE..."]].map(([lbl, key, ph]) => (
-          <div key={key}><span style={S.lbl}>{lbl}</span><input placeholder={ph} value={form[key]} onChange={f(key)} style={S.input} /></div>
-        ))}
+        {[["CAR NICKNAME", "name", "e.g. My Axio, Work Matatu"], ["MAKE", "make", "Toyota, Nissan, Isuzu..."], ["MODEL", "model", "Axio, Demio, NZE..."]].map(([lbl, key, ph]) => <div key={key}><span style={S.lbl}>{lbl}</span><input placeholder={ph} value={form[key]} onChange={f(key)} style={S.input} /></div>)}
         <span style={S.lbl}>YEAR</span><input type="number" placeholder="2018" value={form.year} onChange={f("year")} style={S.input} />
         <span style={S.lbl}>NUMBER PLATE</span><input placeholder="KDG 123A" value={form.plate} onChange={f("plate")} style={{ ...S.input, textTransform: "uppercase" }} />
         <span style={S.lbl}>CAR TYPE</span><select value={form.type} onChange={f("type")} style={S.input}>{CAR_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select>
@@ -1113,6 +1527,9 @@ const CarsPage = ({ cars, setCars, activeCar, setActiveCar }) => {
   );
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// EMERGENCY
+// ═══════════════════════════════════════════════════════════════════════════════
 const EmergencyPage = ({ cars, activeCar }) => {
   const [checked, setChecked] = useState({});
   const [showBooking, setShowBooking] = useState(false);
@@ -1121,7 +1538,6 @@ const EmergencyPage = ({ cars, activeCar }) => {
   const car = cars.find(c => c.id === activeCar);
   const userCar = car ? `${car.make} ${car.model} ${car.year || ""} (${car.plate || ""})` : "";
   const f = k => e => setBooking({ ...booking, [k]: e.target.value });
-
   const handleSOS = () => {
     const msg = `🆘 *EMERGENCY — I need urgent help!*\nCar: ${userCar || "Not specified"}\n📍 Getting GPS...`;
     if (navigator.geolocation) {
@@ -1131,23 +1547,18 @@ const EmergencyPage = ({ cars, activeCar }) => {
       }, () => window.open(`https://wa.me/${MECHANIC.whatsapp}?text=${encodeURIComponent(msg)}`, "_blank"));
     } else window.open(`https://wa.me/${MECHANIC.whatsapp}?text=${encodeURIComponent(msg)}`, "_blank");
   };
-
   const sendBooking = () => {
     window.open(`https://wa.me/${MECHANIC.whatsapp}?text=${encodeURIComponent(`📅 *NEW BOOKING REQUEST*\n👤 ${booking.name}\n📞 ${booking.phone}\n🚗 ${booking.car || userCar}\n🔧 ${booking.type}\n📍 ${booking.location}\n📆 ${booking.date} at ${booking.time}\n📝 ${booking.problem || "Not described"}`)}`, "_blank");
     setSent(true); setTimeout(() => { setSent(false); setShowBooking(false); setBooking({ name: "", phone: "", car: "", date: "", time: "", type: "", location: "", problem: "" }); }, 3000);
   };
-
   const times = ["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","5:00 PM","6:00 PM","7:00 PM"];
-
   return (
     <div style={{ padding: "24px 16px 100px" }}>
       <h2 style={S.h1}>Emergency Help</h2>
       <p style={S.sub}>Stuck on the road? Michael responds 24/7.</p>
-
-      {/* Michael Hero */}
       <div style={{ background: "linear-gradient(135deg,#1a0f00,#0f0f0f,#1a0800)", border: "1px solid #f9731650", borderRadius: 22, padding: 20, marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 14 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 16, background: "linear-gradient(135deg,#f97316,#c2410c)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0, boxShadow: "0 4px 20px #f9731640" }}>🔧</div>
+          <div style={{ width: 56, height: 56, borderRadius: 16, background: "linear-gradient(135deg,#f97316,#c2410c)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0 }}>🔧</div>
           <div style={{ flex: 1 }}>
             <p style={{ fontFamily: "'Playfair Display', serif", fontSize: 17, color: "#fff" }}>{MECHANIC.shortName}</p>
             <p style={{ color: "#f97316", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{MECHANIC.title}</p>
@@ -1156,26 +1567,13 @@ const EmergencyPage = ({ cars, activeCar }) => {
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 14 }}>{MECHANIC.specialities.map((s, i) => <span key={i} style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", background: "#f9731610", color: "#f97316", padding: "3px 8px", borderRadius: 20, border: "1px solid #f9731625" }}>{s}</span>)}</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
-          {[
-            { label: "📞 Call", color: "#22c55e", action: () => window.open(`tel:${MECHANIC.phone}`) },
-            { label: "💬 WhatsApp", color: "#25D366", action: () => window.open(`https://wa.me/${MECHANIC.whatsapp}?text=${encodeURIComponent(`Hello Michael! I need car help. My car: ${userCar || "Not specified"}`)}`) },
-            { label: "📍 Directions", color: "#4285F4", action: () => window.open(MECHANIC.gmaps) },
-            { label: "🏍️ Mobile", color: "#8b5cf6", action: () => window.open(`https://wa.me/${MECHANIC.whatsapp}?text=${encodeURIComponent(`Hello Michael! I need a mobile visit. My car: ${userCar || "Not specified"}. Can you come to me?`)}`) },
-          ].map((btn, i) => (
-            <button key={i} onClick={btn.action} style={{ padding: "8px 4px", borderRadius: 10, background: btn.color + "15", border: `1px solid ${btn.color}30`, color: btn.color, fontFamily: "'DM Mono', monospace", fontSize: 9, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>{btn.label}</button>
-          ))}
+          {[{ label: "📞 Call", color: "#22c55e", action: () => window.open(`tel:${MECHANIC.phone}`) }, { label: "💬 WhatsApp", color: "#25D366", action: () => window.open(`https://wa.me/${MECHANIC.whatsapp}?text=${encodeURIComponent(`Hello Michael! I need car help. My car: ${userCar || "Not specified"}`)}`) }, { label: "📍 Directions", color: "#4285F4", action: () => window.open(MECHANIC.gmaps) }, { label: "🏍️ Mobile", color: "#8b5cf6", action: () => window.open(`https://wa.me/${MECHANIC.whatsapp}?text=${encodeURIComponent(`Hello Michael! I need a mobile visit. My car: ${userCar || "Not specified"}. Can you come to me?`)}`) }].map((btn, i) => <button key={i} onClick={btn.action} style={{ padding: "8px 4px", borderRadius: 10, background: btn.color + "15", border: `1px solid ${btn.color}30`, color: btn.color, fontFamily: "'DM Mono', monospace", fontSize: 9, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>{btn.label}</button>)}
         </div>
       </div>
-
-      {/* SOS */}
       <div style={{ textAlign: "center", padding: "18px 0" }}>
-        <button onClick={handleSOS} style={{ width: 140, height: 140, borderRadius: "50%", background: "radial-gradient(circle at 40% 40%,#ef4444,#7f1d1d)", border: "4px solid #ef444450", boxShadow: "0 0 60px #ef444420", fontSize: 14, fontWeight: 900, color: "#fff", fontFamily: "'DM Mono', monospace", cursor: "pointer", lineHeight: 1.5 }}>
-          🆘{"\n"}SEND{"\n"}HELP
-        </button>
+        <button onClick={handleSOS} style={{ width: 140, height: 140, borderRadius: "50%", background: "radial-gradient(circle at 40% 40%,#ef4444,#7f1d1d)", border: "4px solid #ef444450", boxShadow: "0 0 60px #ef444420", fontSize: 14, fontWeight: 900, color: "#fff", fontFamily: "'DM Mono', monospace", cursor: "pointer", lineHeight: 1.5 }}>🆘{"\n"}SEND{"\n"}HELP</button>
         <p style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace", marginTop: 10 }}>Sends your GPS to Michael instantly</p>
       </div>
-
-      {/* Book */}
       <button onClick={() => setShowBooking(!showBooking)} style={S.btn}>{showBooking ? "✕ Cancel" : "📅 Book a Service"}</button>
       {showBooking && (
         <div style={{ ...S.card, border: "1px solid #f9731640" }}>
@@ -1197,8 +1595,6 @@ const EmergencyPage = ({ cars, activeCar }) => {
             </>}
         </div>
       )}
-
-      {/* Checklist */}
       <div style={{ ...S.card, marginTop: 4 }}>
         <p style={{ color: "#f97316", fontSize: 10, fontFamily: "'DM Mono', monospace", marginBottom: 12 }}>📋 BREAKDOWN CHECKLIST</p>
         {["Move car to a safe spot off the road", "Switch on hazard lights (emergency flashers)", "Apply handbrake and put in Park (P)", "Place warning triangle 50m behind your car", "Stay visible — don't sit inside on highways", "Call Michael or use the SOS button above", "Note your location (road name, landmark)"].map((item, i) => (
@@ -1212,6 +1608,9 @@ const EmergencyPage = ({ cars, activeCar }) => {
   );
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PSV
+// ═══════════════════════════════════════════════════════════════════════════════
 const PSVPage = () => {
   const [tab, setTab] = useState("daily");
   const [checked, setChecked] = useLS("psv_v4", {});
@@ -1224,9 +1623,7 @@ const PSVPage = () => {
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6 }}><span style={{ fontSize: 32 }}>🚐</span><h2 style={S.h1}>PSV Mode</h2></div>
       <p style={S.sub}>Matatu, Taxi & Uber operator tools</p>
       <div style={{ display: "flex", background: "#0d0d0d", borderRadius: 14, padding: 4, marginBottom: 18 }}>
-        {[{ id: "daily", lbl: "DAILY CHECK" }, { id: "ntsa", lbl: "NTSA PSV" }].map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, padding: 10, borderRadius: 10, fontSize: 11, fontFamily: "'DM Mono', monospace", fontWeight: 600, background: tab === t.id ? "#f97316" : "transparent", color: tab === t.id ? "#fff" : "#444", border: "none", cursor: "pointer" }}>{t.lbl}</button>
-        ))}
+        {[{ id: "daily", lbl: "DAILY CHECK" }, { id: "ntsa", lbl: "NTSA PSV" }].map(t => <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, padding: 10, borderRadius: 10, fontSize: 11, fontFamily: "'DM Mono', monospace", fontWeight: 600, background: tab === t.id ? "#f97316" : "transparent", color: tab === t.id ? "#fff" : "#444", border: "none", cursor: "pointer" }}>{t.lbl}</button>)}
       </div>
       <div style={{ ...S.card, marginBottom: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={S.lbl}>PROGRESS</span><p style={{ color: done === items.length ? "#22c55e" : "#f97316", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{done}/{items.length}</p></div>
@@ -1234,12 +1631,10 @@ const PSVPage = () => {
         {done === items.length && <p style={{ color: "#22c55e", fontSize: 11, fontFamily: "'DM Mono', monospace", marginTop: 8 }}>✓ All clear! Ready to roll 🚐</p>}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {items.map((item, i) => (
-          <button key={i} onClick={() => setChecked({ ...checked, [item]: !checked[item] })} style={{ display: "flex", alignItems: "center", gap: 12, background: "#141414", border: `1px solid ${checked[item] ? "#22c55e30" : "#1e1e1e"}`, borderRadius: 12, padding: "12px 14px", cursor: "pointer", textAlign: "left" }}>
-            <span style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${checked[item] ? "#22c55e" : "#333"}`, background: checked[item] ? "#22c55e" : "transparent", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12 }}>{checked[item] ? "✓" : ""}</span>
-            <p style={{ color: checked[item] ? "#444" : "#aaa", fontSize: 12, textDecoration: checked[item] ? "line-through" : "none" }}>{item}</p>
-          </button>
-        ))}
+        {items.map((item, i) => <button key={i} onClick={() => setChecked({ ...checked, [item]: !checked[item] })} style={{ display: "flex", alignItems: "center", gap: 12, background: "#141414", border: `1px solid ${checked[item] ? "#22c55e30" : "#1e1e1e"}`, borderRadius: 12, padding: "12px 14px", cursor: "pointer", textAlign: "left" }}>
+          <span style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${checked[item] ? "#22c55e" : "#333"}`, background: checked[item] ? "#22c55e" : "transparent", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12 }}>{checked[item] ? "✓" : ""}</span>
+          <p style={{ color: checked[item] ? "#444" : "#aaa", fontSize: 12, textDecoration: checked[item] ? "line-through" : "none" }}>{item}</p>
+        </button>)}
       </div>
       <button onClick={() => setChecked({})} style={{ ...S.ghost, marginTop: 14 }}>Reset Checklist</button>
     </div>
@@ -1262,6 +1657,8 @@ const MoreMenu = ({ setPage }) => {
     { icon: "🚗", label: "My Cars", sub: "Manage your vehicles", page: "cars" },
     { icon: "🚐", label: "PSV Tools", sub: "Matatu & taxi checklists", page: "psv" },
     { icon: "💰", label: "Repair Costs", sub: "Kenya price guide", page: "costs" },
+    { icon: "📱", label: "Client Portal", sub: "Subscribe & track your service", page: "clientportal" },
+    { icon: "🔧", label: "Owner Panel", sub: "Manage incoming job requests", page: "ownerpanel" },
   ];
   return (
     <div style={{ padding: "24px 16px 100px" }}>
@@ -1269,9 +1666,7 @@ const MoreMenu = ({ setPage }) => {
       <p style={S.sub}>Everything Car Care KE has to offer.</p>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {items.map(item => (
-          <button key={item.page} onClick={() => setPage(item.page)} style={{ ...S.card, display: "flex", alignItems: "center", gap: 14, cursor: "pointer", textAlign: "left", marginBottom: 0 }}
-            onMouseEnter={e => e.currentTarget.style.borderColor = "#f9731640"}
-            onMouseLeave={e => e.currentTarget.style.borderColor = "#1e1e1e"}>
+          <button key={item.page} onClick={() => setPage(item.page)} style={{ ...S.card, display: "flex", alignItems: "center", gap: 14, cursor: "pointer", textAlign: "left", marginBottom: 0 }}>
             <span style={{ fontSize: 26, width: 44, height: 44, background: "#f9731610", border: "1px solid #f9731620", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{item.icon}</span>
             <div style={{ flex: 1 }}>
               <p style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>{item.label}</p>
@@ -1285,6 +1680,9 @@ const MoreMenu = ({ setPage }) => {
   );
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// COSTS
+// ═══════════════════════════════════════════════════════════════════════════════
 const CostsPage = () => {
   const costs = [{ s: "Oil Change", r: "3,000 – 7,000", i: "🛢️", f: "Every 5,000 km" }, { s: "Brake Pads", r: "4,000 – 12,000", i: "🔴", f: "Every 30,000–50,000 km" }, { s: "Battery", r: "8,000 – 20,000", i: "🔋", f: "Every 3–5 years" }, { s: "Diagnostics", r: "2,000 – 5,000", i: "🔧", f: "As needed" }, { s: "Air Filter", r: "1,500 – 4,000", i: "💨", f: "Every 15,000 km" }, { s: "Spark Plugs", r: "2,500 – 8,000", i: "⚡", f: "Every 30,000 km" }, { s: "Wheel Alignment", r: "2,000 – 5,000", i: "⚙️", f: "Every 10,000 km" }, { s: "Full Service", r: "15,000 – 40,000", i: "🚗", f: "Every 20,000 km" }];
   return (
@@ -1303,7 +1701,358 @@ const CostsPage = () => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// NAV + APP ROOT
+// ADMIN DASHBOARD
+// ═══════════════════════════════════════════════════════════════════════════════
+const AdminDashboard = ({ serviceLog, clientHistory, reviews, insurance, cars, setPage }) => {
+  const [tab, setTab] = useState("overview");
+  const [mpesaPayments, setMpesaPayments] = useState([]);
+  const [firestoreUsers, setFirestoreUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState(new Date());
+
+  const loadFirestoreData = async () => {
+    setLoading(true);
+    try {
+      const { db } = await import('./firebase');
+      const { collection, getDocs, query, orderBy, limit } = await import('firebase/firestore');
+      const paymentsSnap = await getDocs(query(collection(db, "mpesa_payments"), orderBy("createdAt", "desc"), limit(100)));
+      setMpesaPayments(paymentsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const usersSnap = await getDocs(collection(db, "users"));
+      setFirestoreUsers(usersSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLastRefresh(new Date());
+    } catch (err) {
+      console.warn("Firestore not connected yet — showing local data only.", err.message);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { loadFirestoreData(); }, []);
+
+  const now = new Date();
+  const successPayments   = mpesaPayments.filter(p => p.status === "success");
+  const failedPayments    = mpesaPayments.filter(p => p.status === "failed");
+  const cancelledPayments = mpesaPayments.filter(p => p.status === "cancelled");
+  const totalMpesaRevenue = successPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+  const successRate = mpesaPayments.length ? Math.round((successPayments.length / mpesaPayments.length) * 100) : 0;
+  const activeUsers   = firestoreUsers.filter(u => u.status === "active" && u.expiresAt && u.expiresAt.toDate() > now);
+  const expiredUsers  = firestoreUsers.filter(u => u.status !== "active" || (u.expiresAt && u.expiresAt.toDate() < now));
+  const expiringSoon  = activeUsers.filter(u => Math.ceil((u.expiresAt.toDate() - now) / 86400000) <= 7);
+  const totalJobs    = serviceLog?.length || 0;
+  const totalClients = clientHistory?.length || 0;
+  const totalRevLocal = (clientHistory || []).reduce((s, c) => s + (parseFloat(c.total) || 0), 0);
+  const totalRevenue  = totalMpesaRevenue + totalRevLocal;
+  const avgRating     = reviews?.length ? (reviews.reduce((s, r) => s + (r.rating || 5), 0) / reviews.length).toFixed(1) : "—";
+  const topClients    = [...(clientHistory || [])].sort((a, b) => (parseFloat(b.total) || 0) - (parseFloat(a.total) || 0)).slice(0, 5);
+  const recentPayments = mpesaPayments.slice(0, 8);
+  const recentJobs    = [...(serviceLog || [])].reverse().slice(0, 5);
+  const recentClients = [...(clientHistory || [])].reverse().slice(0, 5);
+  const expiredInsurance  = (insurance || []).filter(p => p.expiry && new Date(p.expiry) < now).length;
+  const expiringInsurance = (insurance || []).filter(p => { if (!p.expiry) return false; const d = Math.ceil((new Date(p.expiry) - now) / 86400000); return d >= 0 && d <= 30; }).length;
+  const fmt = (ts) => { try { const d = ts?.toDate ? ts.toDate() : new Date(ts); return d.toLocaleDateString("en-KE", { day: "numeric", month: "short", year: "numeric" }); } catch { return "—"; } };
+
+  const A = {
+    page:        { padding: "24px 16px 100px", minHeight: "100vh", background: "#080808" },
+    tabRow:      { display: "flex", gap: 6, marginBottom: 20, overflowX: "auto", paddingBottom: 4, scrollbarWidth: "none" },
+    tab: (on) => ({ padding: "7px 14px", borderRadius: 10, whiteSpace: "nowrap", border: on ? "1px solid #f97316" : "1px solid #1e1e1e", background: on ? "#f9731618" : "#141414", color: on ? "#f97316" : "#444", fontFamily: "'DM Mono', monospace", fontSize: 11, fontWeight: 600, cursor: "pointer", letterSpacing: "0.05em" }),
+    statGrid:    { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 },
+    stat: (c)  => ({ background: "#141414", border: `1px solid ${c}22`, borderRadius: 16, padding: "16px 14px" }),
+    statVal:(c)=> ({ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 26, color: c, lineHeight: 1, marginBottom: 6 }),
+    statLabel:   { color: "#444", fontSize: 9, fontFamily: "'DM Mono', monospace", letterSpacing: "0.12em" },
+    statSub:     { color: "#2a2a2a", fontSize: 9, fontFamily: "'DM Mono', monospace", marginTop: 4 },
+    card:        { background: "#141414", border: "1px solid #1e1e1e", borderRadius: 16, padding: 16, marginBottom: 12 },
+    sectionLabel:{ color: "#f97316", fontSize: 10, fontFamily: "'DM Mono', monospace", letterSpacing: "0.12em", marginBottom: 12, display: "block" },
+    row: (last)=> ({ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: last ? "none" : "1px solid #111" }),
+    badge:(bg,t)=> ({ background: bg, color: t, fontSize: 9, fontFamily: "'DM Mono', monospace", fontWeight: 700, padding: "3px 8px", borderRadius: 6, letterSpacing: "0.06em", flexShrink: 0 }),
+    emptyState:  { textAlign: "center", padding: "28px 0", color: "#252525", fontSize: 11, fontFamily: "'DM Mono', monospace" },
+    actionBtn:(c)=>({ flex: 1, padding: "11px 8px", borderRadius: 12, border: `1px solid ${c}30`, background: `${c}10`, color: c, fontFamily: "'DM Mono', monospace", fontSize: 11, fontWeight: 700, cursor: "pointer", textAlign: "center", letterSpacing: "0.04em" }),
+    refreshBtn:  { padding: "5px 12px", borderRadius: 8, border: "1px solid #1e1e1e", background: "transparent", color: "#333", fontFamily: "'DM Mono', monospace", fontSize: 10, cursor: "pointer", marginBottom: 14, display: "block" },
+  };
+
+  const statusBadge = (s) => {
+    const map = { success: ["#22c55e20","#22c55e","SUCCESS"], failed: ["#ef444420","#ef4444","FAILED"], cancelled: ["#f59e0b20","#f59e0b","CANCELLED"], pending: ["#3b82f620","#3b82f6","PENDING"] };
+    const [bg, text, label] = map[s] || ["#33333320","#555", s?.toUpperCase() || "—"];
+    return <span style={A.badge(bg, text)}>{label}</span>;
+  };
+
+  const OverviewTab = () => (
+    <>
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#fff", marginBottom: 4 }}>Command Centre</h2>
+        <p style={{ color: "#2a2a2a", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>
+          {new Date().toLocaleDateString("en-KE", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+          {"  ·  "}<span style={{ color: loading ? "#f59e0b" : "#22c55e" }}>{loading ? "⟳ loading..." : "● live"}</span>
+        </p>
+      </div>
+      <button style={A.refreshBtn} onClick={loadFirestoreData}>↺ Refresh · Last: {lastRefresh.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })}</button>
+      <div style={A.statGrid}>
+        <div style={A.stat("#f97316")}><div style={A.statVal("#f97316")}>{totalRevenue > 0 ? `${Math.round(totalRevenue / 1000)}k` : "—"}</div><div style={A.statLabel}>TOTAL REVENUE</div><div style={A.statSub}>{KES(totalRevenue)}</div></div>
+        <div style={A.stat("#22c55e")}><div style={A.statVal("#22c55e")}>{KES(totalMpesaRevenue)}</div><div style={A.statLabel}>M-PESA COLLECTED</div><div style={A.statSub}>{successPayments.length} transactions</div></div>
+        <div style={A.stat("#3b82f6")}><div style={A.statVal("#3b82f6")}>{activeUsers.length}</div><div style={A.statLabel}>ACTIVE SUBS</div><div style={A.statSub}>{expiredUsers.length} expired</div></div>
+        <div style={A.stat("#f59e0b")}><div style={A.statVal("#f59e0b")}>{successRate}%</div><div style={A.statLabel}>PAYMENT SUCCESS</div><div style={A.statSub}>{mpesaPayments.length} total attempts</div></div>
+      </div>
+      <div style={A.statGrid}>
+        <div style={A.stat("#a855f7")}><div style={A.statVal("#a855f7")}>{avgRating}</div><div style={A.statLabel}>AVG RATING</div><div style={A.statSub}>{reviews?.length || 0} reviews</div></div>
+        <div style={A.stat("#06b6d4")}><div style={A.statVal("#06b6d4")}>{totalJobs}</div><div style={A.statLabel}>JOBS LOGGED</div><div style={A.statSub}>{totalClients} clients</div></div>
+      </div>
+      {(expiringSoon.length > 0 || expiredInsurance > 0 || expiringInsurance > 0) && (
+        <div style={{ ...A.card, border: "1px solid #ef444430", background: "#ef444406" }}>
+          <span style={A.sectionLabel}>⚠️ ALERTS</span>
+          {expiringSoon.length > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}><span style={{ color: "#f59e0b", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>{expiringSoon.length} sub{expiringSoon.length > 1 ? "s" : ""} expiring in 7 days</span><span style={A.badge("#f59e0b20", "#f59e0b")}>URGENT</span></div>}
+          {expiredInsurance > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}><span style={{ color: "#ef4444", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>{expiredInsurance} insurance polic{expiredInsurance > 1 ? "ies" : "y"} expired</span><span style={A.badge("#ef444420", "#ef4444")}>EXPIRED</span></div>}
+          {expiringInsurance > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><span style={{ color: "#f59e0b", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>{expiringInsurance} insurance expiring in 30 days</span><span style={A.badge("#f59e0b20", "#f59e0b")}>SOON</span></div>}
+        </div>
+      )}
+      <div style={A.card}>
+        <span style={A.sectionLabel}>⚡ QUICK ACTIONS</span>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <button style={A.actionBtn("#f97316")} onClick={() => setPage("quote")}>📋 New Quote</button>
+          <button style={A.actionBtn("#22c55e")} onClick={() => setPage("log")}>🔧 Log Service</button>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <button style={A.actionBtn("#3b82f6")} onClick={() => setPage("clients")}>👥 Clients</button>
+          <button style={A.actionBtn("#a855f7")} onClick={() => setPage("insurance")}>🛡️ Insurance</button>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <button style={A.actionBtn("#f59e0b")} onClick={() => setTab("mpesa")}>💚 M-Pesa Log</button>
+          <button style={A.actionBtn("#06b6d4")} onClick={() => setTab("subscriptions")}>👑 Subs</button>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={A.actionBtn("#25D366")} onClick={() => setPage("ownerpanel")}>🔧 Owner Panel</button>
+          <button style={A.actionBtn("#8b5cf6")} onClick={() => setPage("clientportal")}>📱 Client Portal</button>
+        </div>
+      </div>
+      <div style={A.card}>
+        <span style={A.sectionLabel}>💚 RECENT M-PESA PAYMENTS</span>
+        {recentPayments.length === 0 ? <div style={A.emptyState}>{loading ? "⟳ Loading from Firebase..." : "No payments yet · Connect Firebase to see live data"}</div>
+          : recentPayments.map((p, i) => (
+            <div key={p.id} style={A.row(i === recentPayments.length - 1)}>
+              <div style={{ flex: 1 }}>
+                <div style={{ color: "#ccc", fontSize: 12, fontFamily: "'DM Mono', monospace", marginBottom: 2 }}>{p.mpesaCode || "—"} · {p.phone || "—"}</div>
+                <div style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{fmt(p.createdAt)}</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: "#22c55e", fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>{p.amount ? KES(p.amount) : "—"}</span>
+                {statusBadge(p.status)}
+              </div>
+            </div>
+          ))}
+      </div>
+      <div style={A.card}>
+        <span style={A.sectionLabel}>🔧 RECENT JOBS</span>
+        {recentJobs.length === 0 ? <div style={A.emptyState}>No service records yet</div>
+          : recentJobs.map((job, i) => (
+            <div key={i} style={A.row(i === recentJobs.length - 1)}>
+              <div><div style={{ color: "#ccc", fontSize: 12, fontFamily: "'DM Mono', monospace", marginBottom: 2 }}>{job.car || job.vehicleName || "Vehicle"}</div><div style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{job.type || job.service || "Service"}</div></div>
+              <span style={{ color: "#f97316", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{job.date || "—"}</span>
+            </div>
+          ))}
+      </div>
+      <div style={A.card}>
+        <span style={A.sectionLabel}>👤 RECENT CLIENTS</span>
+        {recentClients.length === 0 ? <div style={A.emptyState}>No client records yet</div>
+          : recentClients.map((c, i) => (
+            <div key={i} style={A.row(i === recentClients.length - 1)}>
+              <div><div style={{ color: "#ccc", fontSize: 12, fontFamily: "'DM Mono', monospace", marginBottom: 2 }}>{c.clientName || c.name || "Client"}</div><div style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{c.clientCar || c.vehicle || "—"} · {c.clientPhone || c.phone || "—"}</div></div>
+              <span style={{ color: "#22c55e", fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>{c.total ? KES(c.total) : "—"}</span>
+            </div>
+          ))}
+      </div>
+    </>
+  );
+
+  const MpesaTab = () => (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+        {[{ label: "SUCCESS", val: successPayments.length, color: "#22c55e" }, { label: "FAILED", val: failedPayments.length, color: "#ef4444" }, { label: "CANCELLED", val: cancelledPayments.length, color: "#f59e0b" }].map(s => (
+          <div key={s.label} style={{ background: "#141414", border: `1px solid ${s.color}22`, borderRadius: 12, padding: 12, textAlign: "center" }}>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: s.color }}>{s.val}</div>
+            <div style={{ color: "#333", fontSize: 9, fontFamily: "'DM Mono', monospace", marginTop: 4 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ ...A.card, border: "1px solid #22c55e22" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div><div style={A.statLabel}>TOTAL M-PESA REVENUE</div><div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, color: "#22c55e", marginTop: 6 }}>{KES(totalMpesaRevenue)}</div></div>
+          <div style={{ textAlign: "right" }}><div style={A.statLabel}>SUCCESS RATE</div><div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, color: successRate >= 70 ? "#22c55e" : "#ef4444", marginTop: 6 }}>{successRate}%</div></div>
+        </div>
+      </div>
+      <div style={A.card}>
+        <span style={A.sectionLabel}>💚 ALL PAYMENTS ({mpesaPayments.length})</span>
+        {mpesaPayments.length === 0 ? <div style={A.emptyState}>{loading ? "⟳ Loading from Firebase..." : "No M-Pesa payments found"}</div>
+          : mpesaPayments.map((p, i) => (
+            <div key={p.id} style={{ padding: "12px 0", borderBottom: i < mpesaPayments.length - 1 ? "1px solid #111" : "none" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                <div style={{ color: "#fff", fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 600 }}>{p.mpesaCode || p.checkoutRequestID?.slice(0, 16) || "—"}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ color: "#22c55e", fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>{p.amount ? KES(p.amount) : "—"}</span>
+                  {statusBadge(p.status)}
+                </div>
+              </div>
+              <div style={{ color: "#444", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>📞 {p.phone || "—"} · {fmt(p.createdAt)}</div>
+            </div>
+          ))}
+      </div>
+    </>
+  );
+
+  const SubsTab = () => (
+    <>
+      <div style={A.statGrid}>
+        <div style={A.stat("#22c55e")}><div style={A.statVal("#22c55e")}>{activeUsers.length}</div><div style={A.statLabel}>ACTIVE USERS</div></div>
+        <div style={A.stat("#ef4444")}><div style={A.statVal("#ef4444")}>{expiredUsers.length}</div><div style={A.statLabel}>EXPIRED</div></div>
+        <div style={A.stat("#f59e0b")}><div style={A.statVal("#f59e0b")}>{expiringSoon.length}</div><div style={A.statLabel}>EXPIRING IN 7 DAYS</div></div>
+        <div style={A.stat("#3b82f6")}><div style={A.statVal("#3b82f6")}>{firestoreUsers.length}</div><div style={A.statLabel}>TOTAL USERS</div></div>
+      </div>
+      {expiringSoon.length > 0 && (
+        <div style={{ ...A.card, border: "1px solid #f59e0b30" }}>
+          <span style={{ ...A.sectionLabel, color: "#f59e0b" }}>⚠️ EXPIRING SOON — FOLLOW UP NOW</span>
+          {expiringSoon.map((u, i) => {
+            const days = Math.ceil((u.expiresAt.toDate() - now) / 86400000);
+            return <div key={u.id} style={A.row(i === expiringSoon.length - 1)}><div><div style={{ color: "#ccc", fontSize: 12, fontFamily: "'DM Mono', monospace", marginBottom: 2 }}>{u.name || u.email || u.phone || u.id?.slice(0, 18) || "User"}</div><div style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>Expires: {fmt(u.expiresAt)}</div></div><span style={A.badge("#f59e0b20", "#f59e0b")}>{days}d LEFT</span></div>;
+          })}
+        </div>
+      )}
+      <div style={A.card}>
+        <span style={A.sectionLabel}>👑 ALL USERS ({firestoreUsers.length})</span>
+        {firestoreUsers.length === 0 ? <div style={A.emptyState}>{loading ? "⟳ Loading from Firebase..." : "No users found in Firestore"}</div>
+          : firestoreUsers.map((u, i) => {
+            const expired = !u.expiresAt || u.expiresAt.toDate() < now;
+            const days = u.expiresAt ? Math.ceil((u.expiresAt.toDate() - now) / 86400000) : null;
+            const s = u.status === "active" && !expired ? (days <= 7 ? "expiring" : "active") : "expired";
+            const map = { active: ["#22c55e20","#22c55e","ACTIVE"], expiring: ["#f59e0b20","#f59e0b",`${days}d LEFT`], expired: ["#ef444420","#ef4444","EXPIRED"] };
+            const [bg, color, label] = map[s];
+            return (
+              <div key={u.id} style={{ padding: "12px 0", borderBottom: i < firestoreUsers.length - 1 ? "1px solid #111" : "none" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                  <div style={{ color: "#ccc", fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 600 }}>{u.name || u.email || u.phone || "User"}</div>
+                  <span style={A.badge(bg, color)}>{label}</span>
+                </div>
+                <div style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>Last paid: {fmt(u.lastPayment)} · Expires: {fmt(u.expiresAt)}</div>
+              </div>
+            );
+          })}
+      </div>
+    </>
+  );
+
+  const ClientsTab = () => (
+    <>
+      {topClients.length > 0 && (
+        <div style={{ ...A.card, border: "1px solid #f9731630" }}>
+          <span style={A.sectionLabel}>🏆 TOP CLIENTS BY SPEND</span>
+          {topClients.map((c, i) => (
+            <div key={i} style={A.row(i === topClients.length - 1)}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, color: i === 0 ? "#f97316" : i === 1 ? "#888" : "#444" }}>{i + 1}</span>
+                <div><div style={{ color: "#ccc", fontSize: 12, fontFamily: "'DM Mono', monospace", marginBottom: 2 }}>{c.clientName || c.name || "Client"}</div><div style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{c.clientCar || c.vehicle || "—"}</div></div>
+              </div>
+              <span style={{ color: "#f97316", fontSize: 13, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>{KES(c.total || 0)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={A.card}>
+        <span style={A.sectionLabel}>👥 ALL CLIENTS ({totalClients})</span>
+        {!clientHistory?.length ? <div style={A.emptyState}>No client quotes yet.</div>
+          : [...(clientHistory || [])].reverse().map((c, i, arr) => (
+            <div key={i} style={{ padding: "12px 0", borderBottom: i < arr.length - 1 ? "1px solid #111" : "none" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                <div style={{ color: "#fff", fontSize: 13, fontFamily: "'DM Mono', monospace", fontWeight: 600 }}>{c.clientName || c.name || "Client"}</div>
+                <span style={{ color: "#22c55e", fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>{c.total ? KES(c.total) : "—"}</span>
+              </div>
+              <div style={{ color: "#444", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 4 }}>📞 {c.clientPhone || c.phone || "—"} · 🚗 {c.clientCar || c.vehicle || "—"}</div>
+              {(c.clientPhone || c.phone) && <a href={`https://wa.me/254${(c.clientPhone || c.phone || "").replace(/^0/, "").replace(/\s/g, "")}`} target="_blank" rel="noreferrer" style={{ color: "#22c55e", fontSize: 10, fontFamily: "'DM Mono', monospace", textDecoration: "none" }}>💬 WhatsApp →</a>}
+            </div>
+          ))}
+      </div>
+    </>
+  );
+
+  const JobsTab = () => (
+    <div style={A.card}>
+      <span style={A.sectionLabel}>🔧 ALL SERVICE RECORDS ({totalJobs})</span>
+      {!serviceLog?.length ? <div style={A.emptyState}>No jobs logged yet.</div>
+        : [...(serviceLog || [])].reverse().map((job, i, arr) => (
+          <div key={i} style={{ padding: "12px 0", borderBottom: i < arr.length - 1 ? "1px solid #111" : "none" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+              <div style={{ color: "#fff", fontSize: 13, fontFamily: "'DM Mono', monospace", fontWeight: 600 }}>{job.car || job.vehicleName || "Vehicle"}</div>
+              <span style={A.badge("#f9731620", "#f97316")}>{job.date || job.createdAt?.split("T")[0] || "—"}</span>
+            </div>
+            <div style={{ color: "#555", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{job.type || job.service || job.serviceType || "Service recorded"}</div>
+            {job.notes && <div style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace", marginTop: 4 }}>{job.notes}</div>}
+          </div>
+        ))}
+    </div>
+  );
+
+  const ReviewsTab = () => (
+    <>
+      <div style={{ ...A.card, border: "1px solid #a855f730" }}>
+        <span style={A.sectionLabel}>⭐ RATING SUMMARY</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 52, color: "#f97316", lineHeight: 1 }}>{avgRating}</div>
+          <div><div style={{ fontSize: 18, marginBottom: 4 }}>{"⭐".repeat(Math.round(parseFloat(avgRating) || 0))}</div><div style={{ color: "#333", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{reviews?.length || 0} total reviews</div></div>
+        </div>
+      </div>
+      <div style={A.card}>
+        <span style={A.sectionLabel}>💬 ALL REVIEWS</span>
+        {!reviews?.length ? <div style={A.emptyState}>No reviews yet.</div>
+          : [...(reviews || [])].reverse().map((r, i, arr) => (
+            <div key={i} style={{ padding: "12px 0", borderBottom: i < arr.length - 1 ? "1px solid #111" : "none" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ color: "#fff", fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 600 }}>{r.name || r.clientName || "Anonymous"}</span>
+                <span style={{ fontSize: 13 }}>{"⭐".repeat(r.rating || 5)}</span>
+              </div>
+              {r.comment && <div style={{ color: "#444", fontSize: 11, fontFamily: "'DM Mono', monospace", lineHeight: 1.5 }}>"{r.comment}"</div>}
+            </div>
+          ))}
+      </div>
+    </>
+  );
+
+  const InsuranceTab = () => (
+    <div style={A.card}>
+      <span style={A.sectionLabel}>🛡️ INSURANCE POLICIES ({insurance?.length || 0})</span>
+      {!insurance?.length ? <div style={A.emptyState}>No policies tracked yet.</div>
+        : [...(insurance || [])].map((p, i, arr) => {
+          const days = p.expiry ? Math.ceil((new Date(p.expiry) - now) / 86400000) : null;
+          const expired = days !== null && days < 0;
+          const soon = days !== null && days >= 0 && days <= 30;
+          const color = expired ? "#ef4444" : soon ? "#f59e0b" : "#22c55e";
+          const label = expired ? "EXPIRED" : soon ? `${days}d LEFT` : "ACTIVE";
+          return (
+            <div key={i} style={{ padding: "12px 0", borderBottom: i < arr.length - 1 ? "1px solid #111" : "none" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                <span style={{ color: "#fff", fontSize: 12, fontFamily: "'DM Mono', monospace", fontWeight: 600 }}>{p.vehicleName || p.car || `Policy ${i + 1}`}</span>
+                <span style={A.badge(`${color}20`, color)}>{label}</span>
+              </div>
+              <div style={{ color: "#444", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{p.type || "Insurance"} · Expires: {p.expiry || "—"}</div>
+              {p.insurer && <div style={{ color: "#2a2a2a", fontSize: 10, fontFamily: "'DM Mono', monospace", marginTop: 2 }}>{p.insurer}</div>}
+            </div>
+          );
+        })}
+    </div>
+  );
+
+  const TABS = [
+    { id: "overview", label: "Overview" }, { id: "mpesa", label: "M-Pesa" },
+    { id: "subscriptions", label: "Subs" }, { id: "clients", label: "Clients" },
+    { id: "jobs", label: "Jobs" }, { id: "reviews", label: "Reviews" },
+    { id: "insurance", label: "Insurance" },
+  ];
+
+  const content = { overview: <OverviewTab />, mpesa: <MpesaTab />, subscriptions: <SubsTab />, clients: <ClientsTab />, jobs: <JobsTab />, reviews: <ReviewsTab />, insurance: <InsuranceTab /> };
+
+  return (
+    <div style={A.page}>
+      <div style={A.tabRow}>{TABS.map(t => <button key={t.id} style={A.tab(tab === t.id)} onClick={() => setTab(t.id)}>{t.label}</button>)}</div>
+      {content[tab]}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NAV
 // ═══════════════════════════════════════════════════════════════════════════════
 const Nav = ({ page, setPage }) => {
   const tabs = [{ id: "dashboard", icon: "🏠", label: "Home" }, { id: "warnings", icon: "⚠️", label: "Lights" }, { id: "ai", icon: "🤖", label: "AI" }, { id: "emergency", icon: "🆘", label: "Help" }, { id: "more", icon: "☰", label: "More" }];
@@ -1319,6 +2068,9 @@ const Nav = ({ page, setPage }) => {
   );
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// APP ROOT
+// ═══════════════════════════════════════════════════════════════════════════════
 export default function App() {
   const [user, setUser] = useLS("ccc_user", null);
   const [page, setPage] = useState("dashboard");
@@ -1336,23 +2088,26 @@ export default function App() {
   );
 
   const pages = {
-    dashboard: <Dashboard user={user} cars={cars} activeCar={activeCar} serviceLog={serviceLog} setPage={setPage} insurance={insurance} />,
-    warnings: <WarningsPage />,
-    ai: <AIDiagPage cars={cars} activeCar={activeCar} />,
-    log: <ServiceLogPage serviceLog={serviceLog} setServiceLog={setServiceLog} cars={cars} activeCar={activeCar} setCars={setCars} />,
-    costs: <CostsPage />,
-    fuel: <FuelPage />,
-    emergency: <EmergencyPage cars={cars} activeCar={activeCar} />,
-    cars: <CarsPage cars={cars} setCars={setCars} activeCar={activeCar} setActiveCar={setActiveCar} />,
-    psv: <PSVPage />,
-    quote: <QuotePage cars={cars} activeCar={activeCar} clientHistory={clientHistory} setClientHistory={setClientHistory} />,
-    clients: <ClientHistoryPage clientHistory={clientHistory} setClientHistory={setClientHistory} />,
-    referral: <ReferralPage user={user} />,
-    reviews: <ReviewsPage reviews={reviews} setReviews={setReviews} user={user} />,
-    insurance: <InsurancePage cars={cars} insurance={insurance} setInsurance={setInsurance} />,
-    safety: <RoadSafetyPage />,
-    parts: <PartsPage />,
-    more: <MoreMenu setPage={setPage} />,
+    admin:       <AdminDashboard serviceLog={serviceLog} clientHistory={clientHistory} reviews={reviews} insurance={insurance} cars={cars} setPage={setPage} />,
+    clientportal:<ClientPortal user={user} setPage={setPage} />,
+    ownerpanel:  <OwnerPanel setPage={setPage} />,
+    dashboard:   <Dashboard user={user} cars={cars} activeCar={activeCar} serviceLog={serviceLog} setPage={setPage} insurance={insurance} />,
+    warnings:    <WarningsPage />,
+    ai:          <AIDiagPage cars={cars} activeCar={activeCar} />,
+    log:         <ServiceLogPage serviceLog={serviceLog} setServiceLog={setServiceLog} cars={cars} activeCar={activeCar} setCars={setCars} />,
+    costs:       <CostsPage />,
+    fuel:        <FuelPage />,
+    emergency:   <EmergencyPage cars={cars} activeCar={activeCar} />,
+    cars:        <CarsPage cars={cars} setCars={setCars} activeCar={activeCar} setActiveCar={setActiveCar} />,
+    psv:         <PSVPage />,
+    quote:       <QuotePage cars={cars} activeCar={activeCar} clientHistory={clientHistory} setClientHistory={setClientHistory} />,
+    clients:     <ClientHistoryPage clientHistory={clientHistory} setClientHistory={setClientHistory} />,
+    referral:    <ReferralPage user={user} />,
+    reviews:     <ReviewsPage reviews={reviews} setReviews={setReviews} user={user} />,
+    insurance:   <InsurancePage cars={cars} insurance={insurance} setInsurance={setInsurance} />,
+    safety:      <RoadSafetyPage />,
+    parts:       <PartsPage />,
+    more:        <MoreMenu setPage={setPage} />,
   };
 
   return (
@@ -1367,6 +2122,8 @@ export default function App() {
         </button>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <button onClick={() => setPage("log")} style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: "#888", background: "transparent", border: "1px solid #222", borderRadius: 8, padding: "3px 8px", cursor: "pointer" }}>🚗 {cars.length}</button>
+          <button onClick={() => setPage("ownerpanel")} style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: page === "ownerpanel" ? "#f97316" : "#888", background: "transparent", border: "1px solid #222", borderRadius: 8, padding: "3px 8px", cursor: "pointer" }}>🔧 Jobs</button>
+          <button onClick={() => setPage("admin")} style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: page === "admin" ? "#f97316" : "#888", background: "transparent", border: "1px solid #222", borderRadius: 8, padding: "3px 8px", cursor: "pointer" }}>⚙️ Admin</button>
           <button onClick={() => { setUser(null); localStorage.removeItem("ccc_user"); }} style={{ fontSize: 10, color: "#333", fontFamily: "'DM Mono', monospace", background: "transparent", border: "none", cursor: "pointer" }}>Logout</button>
         </div>
       </div>
