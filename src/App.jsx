@@ -746,6 +746,39 @@ const OwnerPanel = ({ setPage }) => {
   const JobCard = ({ job }) => {
     const [bg, color, label] = statusColors[job.status] || ["#33333320","#555","UNKNOWN"];
     const isUpdating = updating === job.id;
+    const [payAmount, setPayAmount] = useState("");
+    const [showPayInput, setShowPayInput] = useState(false);
+    const [payLoading, setPayLoading] = useState(false);
+    const [payMsg, setPayMsg] = useState("");
+
+    const requestPayment = async () => {
+      if (!payAmount) { setPayMsg("⚠️ Enter amount"); return; }
+      if (!job.phone) { setPayMsg("⚠️ No phone number for this client"); return; }
+      setPayLoading(true);
+      setPayMsg("📲 Sending STK push to client...");
+      try {
+        const res = await fetch("https://carcare-ke-backend-production.up.railway.app/pay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phone: job.phone,
+            amount: parseInt(payAmount),
+            userId: job.userId || "owner-request",
+          }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setPayMsg("✅ STK sent! Client should enter PIN now.");
+          setPayAmount("");
+          setTimeout(() => { setPayMsg(""); setShowPayInput(false); }, 6000);
+        } else {
+          setPayMsg(`❌ ${data.error || "Failed — try again"}`);
+        }
+      } catch (err) {
+        setPayMsg("❌ Cannot reach payment server");
+      }
+      setPayLoading(false);
+    };
     const waPhone = (job.phone || "").replace(/^0/, "254").replace(/\s/g, "");
     const waMsg = encodeURIComponent(`Hi ${job.userName || "there"}, your request for "${job.service}" has been received. I'll be in touch shortly. — Michael, Car Care KE`);
     return (
@@ -770,6 +803,38 @@ const OwnerPanel = ({ setPage }) => {
             <a href={`https://www.google.com/maps/search/${encodeURIComponent(job.location || "Nairobi")}`} target="_blank" rel="noreferrer" style={{ ...O.actionBtn("#3b82f6"), textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>📍 Map</a>
           </div>
         )}
+        {/* request payment */}
+        {job.phone && (job.status === "active" || job.status === "accepted" || job.status === "done") && (
+          <div style={{ marginbottom: 10 }}>
+            {!showpayinput ? (
+              <button style={{ ...o.actionbtn("#22c55e"), width: "100%", padding: "10px" }} onclick={() => setshowpayinput(true)}>
+                💚 request m-pesa payment
+              </button>
+            ) : (
+              <div style={{ background: "#0d0d0d", borderradius: 12, padding: 12 }}>
+                <p style={{ color: "#22c55e", fontsize: 10, fontfamily: "'dm mono', monospace", marginbottom: 8 }}>💚 request payment from {(job.username || "client").touppercase()}</p>
+                <div style={{ display: "flex", gap: 8, marginbottom: 8 }}>
+                  <input
+                    placeholder="amount in kes"
+                    value={payamount}
+                    onchange={e => setpayamount(e.target.value)}
+                    type="number"
+                    inputmode="numeric"
+                    style={{ flex: 1, background: "#141414", border: "1px solid #2a2a2a", borderradius: 8, padding: "9px 12px", color: "#fff", fontsize: 13, fontfamily: "'dm mono', monospace", outline: "none" }}
+                  />
+                  <button style={{ ...o.actionbtn("#22c55e"), padding: "9px 14px", opacity: payloading ? 0.6 : 1 }} onclick={requestpayment} disabled={payloading}>
+                    {payloading ? "⟳" : "send"}
+                  </button>
+                  <button style={{ ...o.actionbtn("#ef4444"), padding: "9px 10px" }} onclick={() => { setshowpayinput(false); setpaymsg(""); }}>✕</button>
+                </div>
+                {paymsg && (
+                  <p style={{ color: paymsg.includes("✅") ? "#22c55e" : paymsg.includes("📲") ? "#f59e0b" : "#ef4444", fontsize: 11, fontfamily: "'dm mono', monospace" }}>{paymsg}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={{ display: "flex", gap: 6 }}>
           {job.status === "pending" && (
             <>
