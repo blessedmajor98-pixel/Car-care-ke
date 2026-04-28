@@ -872,6 +872,37 @@ const OwnerPanel = ({ setPage }) => {
 
   return (
     <div style={O.page}>
+
+      {/* Payment Modal */}
+      {payJob && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: "#141414", border: "1px solid #22c55e40", borderRadius: 20, padding: 24, width: "100%", maxWidth: 360 }}>
+            <p style={{ color: "#22c55e", fontSize: 11, fontFamily: "'DM Mono', monospace", letterSpacing: "0.1em", marginBottom: 4 }}>💚 REQUEST PAYMENT</p>
+            <p style={{ color: "#fff", fontSize: 15, fontFamily: "'DM Mono', monospace", fontWeight: 700, marginBottom: 4 }}>{payJob.userName || "Client"}</p>
+            <p style={{ color: "#444", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 16 }}>{payJob.service} · {payJob.phone}</p>
+            <input
+              placeholder="Amount in KES e.g. 4500"
+              value={payAmount}
+              onChange={e => setPayAmount(e.target.value)}
+              type="number"
+              inputMode="numeric"
+              style={{ width: "100%", background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 10, padding: "12px 14px", color: "#fff", fontSize: 14, fontFamily: "'DM Mono', monospace", marginBottom: 12, outline: "none", boxSizing: "border-box" }}
+            />
+            {payMsg && (
+              <p style={{ color: payMsg.includes("✅") ? "#22c55e" : payMsg.includes("📲") ? "#f59e0b" : "#ef4444", fontSize: 12, fontFamily: "'DM Mono', monospace", marginBottom: 12 }}>{payMsg}</p>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button style={{ flex: 2, padding: 13, borderRadius: 12, background: "#22c55e", color: "#fff", fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: 13, border: "none", cursor: "pointer", opacity: payLoading ? 0.6 : 1 }} onClick={requestPayment} disabled={payLoading}>
+                {payLoading ? "⟳ Sending..." : "💚 Send STK Push"}
+              </button>
+              <button style={{ flex: 1, padding: 13, borderRadius: 12, background: "transparent", color: "#555", fontFamily: "'DM Mono', monospace", fontSize: 13, border: "1px solid #2a2a2a", cursor: "pointer" }} onClick={() => { setPayJob(null); setPayMsg(""); setPayAmount(""); }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ marginBottom: 20 }}>
         <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#fff", marginBottom: 4 }}>Owner Panel</h2>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
