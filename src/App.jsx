@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 
 // ─── MICHAEL'S CREDENTIALS ────────────────────────────────────────────────────
 const MECHANIC = {
@@ -746,10 +746,10 @@ const OwnerPanel = ({ setPage }) => {
   const JobCard = ({ job }) => {
     const [bg, color, label] = statusColors[job.status] || ["#33333320","#555","UNKNOWN"];
     const isUpdating = updating === job.id;
-    const [payAmount, setPayAmount] = useState("");
-    const [showPayInput, setShowPayInput] = useState(false);
-    const [payLoading, setPayLoading] = useState(false);
-    const [payMsg, setPayMsg] = useState("");
+    const [payAmount, setPayAmount] = React.useState("");
+    const [showPayInput, setShowPayInput] = React.useState(false);
+    const [payLoading, setPayLoading] = React.useState(false);
+    const [payMsg, setPayMsg] = React.useState("");
 
     const requestPayment = async () => {
       if (!payAmount) { setPayMsg("⚠️ Enter amount"); return; }
