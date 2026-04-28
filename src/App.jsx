@@ -101,17 +101,102 @@ const SEV = { Low: { bg: "#22c55e20", text: "#22c55e", border: "#22c55e40" }, Me
 // ═══════════════════════════════════════════════════════════════════════════════
 // AUTH
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTH PAGE — Firebase Authentication
+// ═══════════════════════════════════════════════════════════════════════════════
+const ADMIN_EMAILS = ["michael@carcare.ke", "blessedmajor98@gmail.com"];
+
 const AuthPage = ({ onLogin }) => {
-  const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ name: "", email: "", password: "", referral: "" });
-  const [err, setErr] = useState("");
+  const [mode, setMode]   = useState("login");
+  const [form, setForm]   = useState({ name: "", email: "", password: "", referral: "", reset: "" });
+  const [err, setErr]     = useState("");
+  const [loading, setLoading] = useState(false);
+  const [showReset, setShowReset] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
   const f = k => e => setForm({ ...form, [k]: e.target.value });
-  const handle = () => {
+
+  const handle = async () => {
+    setErr("");
     if (!form.email || !form.password) return setErr("Fill in all fields");
     if (mode === "signup" && !form.name) return setErr("Enter your name");
-    const ref = form.referral?.trim().toUpperCase();
-    onLogin({ name: form.name || form.email.split("@")[0], email: form.email, referredBy: ref || null, joinedAt: today(), discountEarned: ref ? MECHANIC.referralDiscount : 0 });
+    if (form.password.length < 6) return setErr("Password must be at least 6 characters");
+    setLoading(true);
+    try {
+      const { auth } = await import('./firebase');
+      const { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } = await import('firebase/auth');
+      const { db } = await import('./firebase');
+      const { doc, setDoc, getDoc, serverTimestamp } = await import('firebase/firestore');
+
+      let firebaseUser;
+
+      if (mode === "login") {
+        const cred = await signInWithEmailAndPassword(auth, form.email, form.password);
+        firebaseUser = cred.user;
+      } else {
+        const cred = await createUserWithEmailAndPassword(auth, form.email, form.password);
+        firebaseUser = cred.user;
+        await updateProfile(firebaseUser, { displayName: form.name });
+        // Save user to Firestore
+        const ref = form.referral?.trim().toUpperCase();
+        await setDoc(doc(db, "users", firebaseUser.uid), {
+          name: form.name,
+          email: form.email,
+          role: ADMIN_EMAILS.includes(form.email.toLowerCase()) ? "admin" : "user",
+          status: "inactive",
+          referredBy: ref || null,
+          discountEarned: ref ? MECHANIC.referralDiscount : 0,
+          joinedAt: serverTimestamp(),
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      // Get user data from Firestore
+      const { getDoc: gd, doc: d } = await import('firebase/firestore');
+      const userDoc = await gd(d(db, "users", firebaseUser.uid));
+      const userData = userDoc.exists() ? userDoc.data() : {};
+
+      const isAdmin = ADMIN_EMAILS.includes(form.email.toLowerCase());
+
+      onLogin({
+        uid:          firebaseUser.uid,
+        name:         firebaseUser.displayName || form.name || form.email.split("@")[0],
+        email:        firebaseUser.email,
+        role:         isAdmin ? "admin" : (userData.role || "user"),
+        referredBy:   userData.referredBy || null,
+        discountEarned: userData.discountEarned || 0,
+        joinedAt:     today(),
+      });
+    } catch (e) {
+      const msgs = {
+        "auth/user-not-found":       "No account found with this email",
+        "auth/wrong-password":       "Incorrect password",
+        "auth/email-already-in-use": "Email already registered — please login",
+        "auth/invalid-email":        "Invalid email address",
+        "auth/weak-password":        "Password too weak — use at least 6 characters",
+        "auth/invalid-credential":   "Incorrect email or password",
+        "auth/too-many-requests":    "Too many attempts — try again later",
+      };
+      setErr(msgs[e.code] || e.message || "Something went wrong");
+    }
+    setLoading(false);
   };
+
+  const handleReset = async () => {
+    if (!form.reset) return setErr("Enter your email address");
+    setLoading(true);
+    try {
+      const { auth } = await import('./firebase');
+      const { sendPasswordResetEmail } = await import('firebase/auth');
+      await sendPasswordResetEmail(auth, form.reset);
+      setResetSent(true);
+      setErr("");
+    } catch (e) {
+      setErr("Could not send reset email — check the address");
+    }
+    setLoading(false);
+  };
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", padding: "24px 20px", background: "#080808" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Mono:wght@400;500&display=swap');`}</style>
@@ -125,34 +210,60 @@ const AuthPage = ({ onLogin }) => {
           ))}
         </div>
       </div>
+
       <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 24, padding: 24 }}>
-        <div style={{ display: "flex", background: "#0a0a0a", borderRadius: 14, padding: 4, marginBottom: 20 }}>
-          {["login", "signup"].map(m => (
-            <button key={m} onClick={() => setMode(m)} style={{ flex: 1, padding: 10, borderRadius: 10, fontSize: 11, fontFamily: "'DM Mono', monospace", fontWeight: 600, background: mode === m ? "#f97316" : "transparent", color: mode === m ? "#fff" : "#444", border: "none", cursor: "pointer" }}>
-              {m === "login" ? "LOGIN" : "SIGN UP"}
+        {showReset ? (
+          <>
+            <p style={{ color: "#f97316", fontSize: 13, fontFamily: "'DM Mono', monospace", marginBottom: 16, textAlign: "center" }}>🔑 RESET PASSWORD</p>
+            {resetSent ? (
+              <div style={{ textAlign: "center", padding: "20px 0" }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
+                <p style={{ color: "#22c55e", fontSize: 13, fontFamily: "'DM Mono', monospace" }}>Reset link sent! Check your email.</p>
+                <button onClick={() => { setShowReset(false); setResetSent(false); }} style={{ ...S.ghost, marginTop: 16 }}>← Back to Login</button>
+              </div>
+            ) : (
+              <>
+                <input placeholder="Your email address" type="email" value={form.reset} onChange={f("reset")} style={S.input} />
+                {err && <p style={{ color: "#ef4444", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 10 }}>{err}</p>}
+                <button onClick={handleReset} disabled={loading} style={{ ...S.btn, opacity: loading ? 0.6 : 1 }}>{loading ? "⟳ Sending..." : "📧 Send Reset Link"}</button>
+                <button onClick={() => setShowReset(false)} style={S.ghost}>← Back to Login</button>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <div style={{ display: "flex", background: "#0a0a0a", borderRadius: 14, padding: 4, marginBottom: 20 }}>
+              {["login", "signup"].map(m => (
+                <button key={m} onClick={() => { setMode(m); setErr(""); }} style={{ flex: 1, padding: 10, borderRadius: 10, fontSize: 11, fontFamily: "'DM Mono', monospace", fontWeight: 600, background: mode === m ? "#f97316" : "transparent", color: mode === m ? "#fff" : "#444", border: "none", cursor: "pointer" }}>
+                  {m === "login" ? "LOGIN" : "SIGN UP"}
+                </button>
+              ))}
+            </div>
+            {mode === "signup" && <input placeholder="Your full name" value={form.name} onChange={f("name")} style={S.input} />}
+            <input placeholder="Email address" type="email" value={form.email} onChange={f("email")} style={S.input} autoComplete="email" />
+            <input placeholder="Password (min 6 characters)" type="password" value={form.password} onChange={f("password")} style={S.input} autoComplete={mode === "login" ? "current-password" : "new-password"} />
+            {mode === "signup" && (
+              <div>
+                <input placeholder="Referral code (optional — get discount!)" value={form.referral} onChange={f("referral")} style={{ ...S.input, textTransform: "uppercase" }} />
+                {form.referral && <p style={{ color: "#22c55e", fontSize: 11, fontFamily: "'DM Mono', monospace", marginTop: -6, marginBottom: 10 }}>✓ {MECHANIC.referralDiscount}% discount applied on your first service!</p>}
+              </div>
+            )}
+            {err && <p style={{ color: "#ef4444", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 10 }}>{err}</p>}
+            <button onClick={handle} disabled={loading} style={{ ...S.btn, opacity: loading ? 0.6 : 1 }}>
+              {loading ? "⟳ Please wait..." : mode === "login" ? "→ Login" : "→ Create Account"}
             </button>
-          ))}
-        </div>
-        {mode === "signup" && <input placeholder="Your full name" value={form.name} onChange={f("name")} style={S.input} />}
-        <input placeholder="Email address" type="email" value={form.email} onChange={f("email")} style={S.input} />
-        <input placeholder="Password" type="password" value={form.password} onChange={f("password")} style={S.input} />
-        {mode === "signup" && (
-          <div>
-            <input placeholder="Referral code (optional — get discount!)" value={form.referral} onChange={f("referral")} style={{ ...S.input, textTransform: "uppercase" }} />
-            {form.referral && <p style={{ color: "#22c55e", fontSize: 11, fontFamily: "'DM Mono', monospace", marginTop: -6, marginBottom: 10 }}>✓ {MECHANIC.referralDiscount}% discount applied on your first service!</p>}
-          </div>
+            {mode === "login" && (
+              <button onClick={() => { setShowReset(true); setErr(""); }} style={{ background: "transparent", border: "none", color: "#444", fontSize: 11, fontFamily: "'DM Mono', monospace", cursor: "pointer", width: "100%", textAlign: "center", marginBottom: 10 }}>
+                Forgot password?
+              </button>
+            )}
+          </>
         )}
-        {err && <p style={{ color: "#ef4444", fontSize: 11, fontFamily: "'DM Mono', monospace", marginBottom: 10 }}>{err}</p>}
-        <button onClick={handle} style={S.btn}>{mode === "login" ? "→ Login" : "→ Create Account"}</button>
-        <button onClick={() => onLogin({ name: "Demo User", email: "demo@carcare.ke", joinedAt: today() })} style={S.ghost}>Try Demo (No Account Needed)</button>
       </div>
     </div>
   );
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// CLIENT PORTAL
-// ═══════════════════════════════════════════════════════════════════════════════
 const ClientPortal = ({ user, setPage }) => {
   const [clientTab, setClientTab] = useState("home");
   const [subStatus, setSubStatus] = useState(null);
@@ -163,10 +274,10 @@ const ClientPortal = ({ user, setPage }) => {
   const [plan, setPlan] = useState("monthly");
   const [phone, setPhone] = useState("");
   const [service, setService] = useState("");
-  const [location, setLocation] = useState("");  
+  const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
 
-  const BACKEND_URL = "https://carcare-ke-backend-production.up.railway.app";
+  const BACKEND_URL = "http://localhost:3001";
 
   const loadData = async () => {
     setLoading(true);
@@ -214,8 +325,7 @@ const ClientPortal = ({ user, setPage }) => {
         setPayMsg(`❌ ${data.error || "Payment failed — try again"}`);
       }
     } catch (err) {
-      console.error("PAY ERROR:", err);
-setPayMsg("❌ Check browser console for error details");
+      setPayMsg("❌ Cannot reach payment server — check connection");
     }
     setPayLoading(false);
   };
@@ -2073,15 +2183,78 @@ const Nav = ({ page, setPage }) => {
 // APP ROOT
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function App() {
-  const [user, setUser] = useLS("ccc_user", null);
-  const [page, setPage] = useState("dashboard");
-  const [cars, setCars] = useLS("ccc_cars", []);
-  const [activeCar, setActiveCar] = useLS("ccc_active_car", null);
+  const [user, setUser]   = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [page, setPage]   = useState("dashboard");
+  const [cars, setCars]   = useLS("ccc_cars", []);
+  const [activeCar, setActiveCar]   = useLS("ccc_active_car", null);
   const [serviceLog, setServiceLog] = useLS("ccc_services", []);
   const [clientHistory, setClientHistory] = useLS("ccc_clients", []);
-  const [reviews, setReviews] = useLS("ccc_reviews", []);
+  const [reviews, setReviews]   = useLS("ccc_reviews", []);
   const [insurance, setInsurance] = useLS("ccc_insurance", []);
 
+  // ── Firebase Auth state listener ──────────────────────────────────────────
+  useEffect(() => {
+    let unsubscribe;
+    const initAuth = async () => {
+      try {
+        const { auth } = await import('./firebase');
+        const { onAuthStateChanged } = await import('firebase/auth');
+        const { db } = await import('./firebase');
+        const { doc, getDoc } = await import('firebase/firestore');
+        unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+          if (firebaseUser) {
+            const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+            const userData = userDoc.exists() ? userDoc.data() : {};
+            const isAdmin = ADMIN_EMAILS.includes(firebaseUser.email?.toLowerCase());
+            setUser({
+              uid:           firebaseUser.uid,
+              name:          firebaseUser.displayName || userData.name || firebaseUser.email?.split("@")[0],
+              email:         firebaseUser.email,
+              role:          isAdmin ? "admin" : (userData.role || "user"),
+              referredBy:    userData.referredBy || null,
+              discountEarned: userData.discountEarned || 0,
+              joinedAt:      userData.joinedAt || today(),
+            });
+          } else {
+            setUser(null);
+          }
+          setAuthLoading(false);
+        });
+      } catch (err) {
+        console.warn("Auth init error:", err.message);
+        setAuthLoading(false);
+      }
+    };
+    initAuth();
+    return () => unsubscribe?.();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      const { auth } = await import('./firebase');
+      const { signOut } = await import('firebase/auth');
+      await signOut(auth);
+      setUser(null);
+      setPage("dashboard");
+    } catch (err) {
+      console.warn("Logout error:", err.message);
+    }
+  };
+
+  const isAdmin = user && ADMIN_EMAILS.includes(user.email?.toLowerCase());
+
+  // ── Loading screen ─────────────────────────────────────────────────────────
+  if (authLoading) return (
+    <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#080808", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🚗</div>
+        <p style={{ color: "#f97316", fontFamily: "'DM Mono', monospace", fontSize: 12 }}>⟳ Loading Car Care KE...</p>
+      </div>
+    </div>
+  );
+
+  // ── Auth gate ──────────────────────────────────────────────────────────────
   if (!user) return (
     <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#080808" }}>
       <AuthPage onLogin={u => setUser(u)} />
@@ -2089,26 +2262,26 @@ export default function App() {
   );
 
   const pages = {
-    admin:       <AdminDashboard serviceLog={serviceLog} clientHistory={clientHistory} reviews={reviews} insurance={insurance} cars={cars} setPage={setPage} />,
-    clientportal:<ClientPortal user={user} setPage={setPage} />,
-    ownerpanel:  <OwnerPanel setPage={setPage} />,
-    dashboard:   <Dashboard user={user} cars={cars} activeCar={activeCar} serviceLog={serviceLog} setPage={setPage} insurance={insurance} />,
-    warnings:    <WarningsPage />,
-    ai:          <AIDiagPage cars={cars} activeCar={activeCar} />,
-    log:         <ServiceLogPage serviceLog={serviceLog} setServiceLog={setServiceLog} cars={cars} activeCar={activeCar} setCars={setCars} />,
-    costs:       <CostsPage />,
-    fuel:        <FuelPage />,
-    emergency:   <EmergencyPage cars={cars} activeCar={activeCar} />,
-    cars:        <CarsPage cars={cars} setCars={setCars} activeCar={activeCar} setActiveCar={setActiveCar} />,
-    psv:         <PSVPage />,
-    quote:       <QuotePage cars={cars} activeCar={activeCar} clientHistory={clientHistory} setClientHistory={setClientHistory} />,
-    clients:     <ClientHistoryPage clientHistory={clientHistory} setClientHistory={setClientHistory} />,
-    referral:    <ReferralPage user={user} />,
-    reviews:     <ReviewsPage reviews={reviews} setReviews={setReviews} user={user} />,
-    insurance:   <InsurancePage cars={cars} insurance={insurance} setInsurance={setInsurance} />,
-    safety:      <RoadSafetyPage />,
-    parts:       <PartsPage />,
-    more:        <MoreMenu setPage={setPage} />,
+    admin:        isAdmin ? <AdminDashboard serviceLog={serviceLog} clientHistory={clientHistory} reviews={reviews} insurance={insurance} cars={cars} setPage={setPage} /> : <Dashboard user={user} cars={cars} activeCar={activeCar} serviceLog={serviceLog} setPage={setPage} insurance={insurance} />,
+    clientportal: <ClientPortal user={user} setPage={setPage} />,
+    ownerpanel:   isAdmin ? <OwnerPanel setPage={setPage} /> : <Dashboard user={user} cars={cars} activeCar={activeCar} serviceLog={serviceLog} setPage={setPage} insurance={insurance} />,
+    dashboard:    <Dashboard user={user} cars={cars} activeCar={activeCar} serviceLog={serviceLog} setPage={setPage} insurance={insurance} />,
+    warnings:     <WarningsPage />,
+    ai:           <AIDiagPage cars={cars} activeCar={activeCar} />,
+    log:          <ServiceLogPage serviceLog={serviceLog} setServiceLog={setServiceLog} cars={cars} activeCar={activeCar} setCars={setCars} />,
+    costs:        <CostsPage />,
+    fuel:         <FuelPage />,
+    emergency:    <EmergencyPage cars={cars} activeCar={activeCar} />,
+    cars:         <CarsPage cars={cars} setCars={setCars} activeCar={activeCar} setActiveCar={setActiveCar} />,
+    psv:          <PSVPage />,
+    quote:        <QuotePage cars={cars} activeCar={activeCar} clientHistory={clientHistory} setClientHistory={setClientHistory} />,
+    clients:      <ClientHistoryPage clientHistory={clientHistory} setClientHistory={setClientHistory} />,
+    referral:     <ReferralPage user={user} />,
+    reviews:      <ReviewsPage reviews={reviews} setReviews={setReviews} user={user} />,
+    insurance:    <InsurancePage cars={cars} insurance={insurance} setInsurance={setInsurance} />,
+    safety:       <RoadSafetyPage />,
+    parts:        <PartsPage />,
+    more:         <MoreMenu setPage={setPage} />,
   };
 
   return (
@@ -2123,9 +2296,9 @@ export default function App() {
         </button>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <button onClick={() => setPage("log")} style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: "#888", background: "transparent", border: "1px solid #222", borderRadius: 8, padding: "3px 8px", cursor: "pointer" }}>🚗 {cars.length}</button>
-          <button onClick={() => setPage("ownerpanel")} style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: page === "ownerpanel" ? "#f97316" : "#888", background: "transparent", border: "1px solid #222", borderRadius: 8, padding: "3px 8px", cursor: "pointer" }}>🔧 Jobs</button>
-          <button onClick={() => setPage("admin")} style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: page === "admin" ? "#f97316" : "#888", background: "transparent", border: "1px solid #222", borderRadius: 8, padding: "3px 8px", cursor: "pointer" }}>⚙️ Admin</button>
-          <button onClick={() => { setUser(null); localStorage.removeItem("ccc_user"); }} style={{ fontSize: 10, color: "#333", fontFamily: "'DM Mono', monospace", background: "transparent", border: "none", cursor: "pointer" }}>Logout</button>
+          {isAdmin && <button onClick={() => setPage("ownerpanel")} style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: page === "ownerpanel" ? "#f97316" : "#888", background: "transparent", border: "1px solid #222", borderRadius: 8, padding: "3px 8px", cursor: "pointer" }}>🔧 Jobs</button>}
+          {isAdmin && <button onClick={() => setPage("admin")} style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: page === "admin" ? "#f97316" : "#888", background: "transparent", border: "1px solid #222", borderRadius: 8, padding: "3px 8px", cursor: "pointer" }}>⚙️ Admin</button>}
+          <button onClick={handleLogout} style={{ fontSize: 10, color: "#333", fontFamily: "'DM Mono', monospace", background: "transparent", border: "none", cursor: "pointer" }}>Logout</button>
         </div>
       </div>
 
